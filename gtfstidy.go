@@ -20,7 +20,97 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
+
+func PrintStatsAboutFeed(feed *gtfsparser.Feed) {
+	if feed == nil {
+		fmt.Println("Error: Feed is nil.")
+		return
+	}
+	var numberOfFrequencies int = 0
+
+	routeTypeCount := make(map[int16]int)
+	var minLat, maxLat, minLon, maxLon float64
+
+	minLat, maxLat = 90.0, -90.0
+	minLon, maxLon = 180.0, -180.0
+
+	var minDate = time.Date(9999, 12, 31, 12, 0, 0, 0, time.UTC)
+	var maxDate = time.Date(0, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	for _, service := range feed.Services {
+		startDate := service.GetFirstActiveDate()
+		endDate := service.GetLastActiveDate()
+
+		startTime := startDate.GetTime()
+		endTime := endDate.GetTime()
+
+		if startTime.Before(minDate) {
+			minDate = startTime
+		}
+		if endTime.After(maxDate) {
+			maxDate = endTime
+		}
+	}
+
+	for _, T := range feed.Trips {
+		if T.Frequencies != nil {
+			numberOfFrequencies += len(*T.Frequencies)
+		}
+	}
+
+	for _, route := range feed.Routes {
+		routeTypeCount[route.Type]++
+	}
+
+	for _, stop := range feed.Stops {
+		lat := float64(stop.Lat)
+		lon := float64(stop.Lon)
+
+		if lat < minLat {
+			minLat = lat
+		}
+		if lat > maxLat {
+			maxLat = lat
+		}
+		if lon < minLon {
+			minLon = lon
+		}
+		if lon > maxLon {
+			maxLon = lon
+		}
+	}
+
+	fmt.Printf("GTFS Feed Statistics:\n")
+	fmt.Printf("%-20s %10d\n", "Agencies:", len(feed.Agencies))
+	fmt.Printf("%-20s %10d\n", "Stops:", len(feed.Stops))
+	fmt.Printf("%-20s %10d\n", "Routes:", len(feed.Routes))
+	fmt.Printf("%-20s %10d\n", "Trips:", len(feed.Trips))
+	fmt.Printf("%-20s %10d\n", "Stop Times:", feed.NumStopTimes)
+	fmt.Printf("%-20s %10d\n", "Transfers:", len(feed.Transfers))
+	fmt.Printf("%-20s %10d\n", "Frequencies:", numberOfFrequencies)
+	fmt.Printf("%-20s %10d\n", "Shapes:", feed.NumShpPoints)
+	fmt.Printf("%-20s %10d\n", "Services:", len(feed.Services))
+	fmt.Printf("%-20s %10d\n", "Fare Attributes:", len(feed.FareAttributes))
+	fmt.Printf("%-20s %10d\n", "Levels:", len(feed.Levels))
+	fmt.Printf("%-20s %10d\n", "Pathways:", len(feed.Pathways))
+
+	// Print routes by type
+	fmt.Printf("Routes by Type:\n")
+	for routeType, count := range routeTypeCount {
+		fmt.Printf("\t%-20s %10d\n", fmt.Sprintf("Route Type %d:", routeType), count)
+	}
+
+	fmt.Printf("Stop Bounding Box:\n")
+	fmt.Printf("\t%-20s %10.6f\n", "Min Lat:", minLat)
+	fmt.Printf("\t%-20s %10.6f\n", "Max Lat:", maxLat)
+	fmt.Printf("\t%-20s %10.6f\n", "Min Lon:", minLon)
+	fmt.Printf("\t%-20s %10.6f\n", "Max Lon:", maxLon)
+
+	fmt.Printf("Feed start date: %02d.%02d.%04d\n", minDate.Day(), minDate.Month(), minDate.Year())
+	fmt.Printf("Feed end date:   %02d.%02d.%04d\n", maxDate.Day(), maxDate.Month(), maxDate.Year())
+}
 
 func getGtfsPoly(poly [][][]float64) gtfsparser.Polygon {
 	outer := make([][2]float64, len(poly[0]))
@@ -192,6 +282,8 @@ func main() {
 	useGoogleSupportedRouteTypes := flag.BoolP("google-supported-route-types", "", false, "Only use (extended) route types supported by Google")
 	motFilterStr := flag.StringP("keep-mots", "M", "", "comma-separated list of MOTs to keep, empty filter (default) keeps all")
 	motFilterNegStr := flag.StringP("drop-mots", "N", "", "comma-separated list of MOTs to drop")
+
+	showStats := flag.BoolP("show-stats", "", false, "Display stats about the cleaned up GTFS feed")
 	help := flag.BoolP("help", "?", false, "this message")
 
 	flag.Parse()
@@ -924,6 +1016,10 @@ func main() {
 					}
 				}
 			}
+		}
+
+		if *showStats {
+			PrintStatsAboutFeed(feed)
 		}
 
 		fmt.Fprintf(os.Stdout, "Outputting GTFS feed to '%s'...", *outputPath)

@@ -3,3 +3,4 @@ gtfstidy
 go.mod
 go.sum
 vendor/
+local_tests/
