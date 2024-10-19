@@ -1,0 +1,14 @@
+route_id,service_id,trip_id
+1,1,realistic_trip_bus
+1,1,too_fast_trip_bus
+1_1,1,too_fast_trip_bus_but_too_close
+2,1,realistic_trip_train
+2,1,too_fast_trip_train
+3,1,realistic_trip_subway
+3,1,too_fast_trip_subway
+3_1,1,too_fast_trip_subway_wrong_coordinate
+3_2,1,too_fast_trip_subway_with_frequencies
+4,1,realistic_trip_tram
+4,1,too_fast_trip_tram
+5,1,realistic_trip_ferry
+5,1,too_fast_trip_ferry

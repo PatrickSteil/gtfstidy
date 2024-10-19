@@ -1,0 +1,9 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+1,1,Bus 1,Test Bus Route,3
+1_1,1,Bus 1 Too Close,Test Bus Route,3
+2,1,Train 1,Test Train Route,2
+3,1,Subway 1,Test Subway Route,1
+3_1,1,Subway 2 Too Fast,Test Subway Route,1
+3_2,1,Subway 2 Frequencies,Test Subway Route,1
+4,1,Tram 1,Test Tram Route,0
+5,1,Ferry 1,Test Ferry Route,4

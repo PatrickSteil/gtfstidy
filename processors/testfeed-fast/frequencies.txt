@@ -1,0 +1,2 @@
+trip_id,start_time,end_time,headway_secs
+too_fast_trip_subway_with_frequencies,08:00:00,18:00:00,300

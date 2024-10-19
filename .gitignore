@@ -1,1 +1,5 @@
 *.swp
+gtfstidy
+go.mod
+go.sum
+vendor/
