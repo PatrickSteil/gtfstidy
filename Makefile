@@ -29,4 +29,5 @@ fmt:
 	@gofmt -s -w $(SRC)
 
 test: $(SRC)
+	@go clean -testcache
 	@go test -cover ./...
