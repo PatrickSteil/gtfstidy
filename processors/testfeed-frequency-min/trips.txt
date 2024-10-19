@@ -1,0 +1,15 @@
+route_id,service_id,trip_id
+1,1,trip_bus_A
+1,1,trip_bus_B
+1,1,trip_bus_C
+1,1,trip_bus_D
+1,1,trip_bus_E
+1,1,trip_bus_F
+2,1,trip_train_A
+2,1,trip_train_B
+2,1,trip_train_C
+2,1,trip_train_D
+3,1,trip_bus_irregular_A
+3,1,trip_bus_irregular_B
+3,1,trip_bus_irregular_C
+1,2,trip_bus_regular_diff_service

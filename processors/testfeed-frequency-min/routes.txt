@@ -1,0 +1,4 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+1,1,Bus 1,Test Bus Route Regular,3
+2,1,Train 1,Test Train Route Regular,2
+3,1,Bus 2,Test Bus Route Irregular,3

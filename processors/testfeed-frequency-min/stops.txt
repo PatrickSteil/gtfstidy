@@ -1,0 +1,5 @@
+stop_id,stop_name,stop_lat,stop_lon
+1,Fontäne am Sendlinger Tor,48.13349269207973,11.565904403563675
+2,Monopteros im Englischen Garten,48.14990741396133,11.59092739623911
+3,Marienplatz,48.137649715960364,11.576063568089292
+4,Biergarten Englischer Garten,48.152280597547055,11.592027090902024
