@@ -13,3 +13,6 @@ route_id,service_id,trip_id
 3,1,trip_bus_irregular_B
 3,1,trip_bus_irregular_C
 1,2,trip_bus_regular_diff_service
+4,1,trip_tram_with_freq_A
+4,1,trip_tram_with_freq_B
+4,1,trip_tram_with_freq_C

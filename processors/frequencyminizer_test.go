@@ -59,6 +59,8 @@ func TestFrequencyMinimizer(t *testing.T) {
 	tripsTogether1 := []string{"trip_bus_A", "trip_bus_B", "trip_bus_C", "trip_bus_D", "trip_bus_E", "trip_bus_F"}
 	// These will *not* be grouped into 1 frequency due to MaxHeadway
 	tripsTogether2 := []string{"trip_train_A", "trip_train_B", "trip_train_C", "trip_train_D"}
+	// These should be grouped into 1 frequency, but for trip_tram_with_freq_A there is already a fitting frequency
+	tripsTogether3 := []string{"trip_tram_with_freq_A", "trip_tram_with_freq_B", "trip_tram_with_freq_C"}
 
 	if countTripsInFeed(tripsTogether1, feed) != 1 {
 		t.Error("Exactly one trip of the given trip list should be the representative of this frequency")
@@ -68,11 +70,19 @@ func TestFrequencyMinimizer(t *testing.T) {
 		t.Error("All trips of the given trip list should be the representative of this frequency")
 	}
 
+	if countTripsInFeed(tripsTogether3, feed) != 1 {
+		t.Error("Exactly one trip of the given trip list should be the representative of this frequency")
+	}
+
 	if countFrequenciesOfTripsInFeed(tripsTogether1, feed) != 1 {
 		t.Error("There are not enough frequencies being added for the group of trips!")
 	}
 
 	if countFrequenciesOfTripsInFeed(tripsTogether2, feed) != 0 {
+		t.Error("There are should not be any frequencies being added for the group of trips!")
+	}
+
+	if countFrequenciesOfTripsInFeed(tripsTogether3, feed) != 1 {
 		t.Error("There are should not be any frequencies being added for the group of trips!")
 	}
 
@@ -89,7 +99,7 @@ func TestFrequencyMinimizer(t *testing.T) {
 		t.Error("The trip 'trip_bus_regular_diff_service' should be in the dataset!")
 	}
 
-	if 9 != len(feed.Trips) {
+	if 10 != len(feed.Trips) {
 		t.Error("There are too many trips!")
 	}
 }
