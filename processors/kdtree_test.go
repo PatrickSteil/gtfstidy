@@ -74,6 +74,24 @@ func TestBuildAndSearch(t *testing.T) {
 	matchResults(t, kdResults, linear)
 }
 
+// Test building the tree and searching
+func TestBuildParallelAndSearch(t *testing.T) {
+	points := testPoints()
+	tree := BuildKDTreeParallelLimited(points, 0)
+	if tree == nil {
+		t.Fatal("Tree is nil after building from points")
+	}
+
+	query := Point[Payload]{Lat: 50.0, Lon: 10.0}
+	radius := 300.0 // km
+
+	var kdResults []Point[Payload]
+	SearchRange(tree, query, radius, 0, &kdResults)
+
+	linear := linearSearch(points, query, radius)
+	matchResults(t, kdResults, linear)
+}
+
 // Test inserting into the tree
 func TestInsert(t *testing.T) {
 	points := testPoints()

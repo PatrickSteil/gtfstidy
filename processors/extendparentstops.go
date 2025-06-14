@@ -22,32 +22,33 @@ var TOL_IS_SAME = 85
 const radiusKm = 0.5
 
 func normalize(name string) string {
-	// Remove diacritics (e.g. ü -> u)
+	// Remove diacritics (e.g. "ü" -> "u", "é" -> "e")
 	name = unidecode.Unidecode(name)
 
-	// Convert all letters to lowercase
+	// Convert to lowercase for case-insensitive comparison
 	name = strings.ToLower(name)
 
-	// Add a space between any character and '(' if missing
-	// e.g. "Hbf(Frankfurt)" -> "Hbf (Frankfurt)"
-	name = regexp.MustCompile(`(\S)\(`).ReplaceAllString(name, "$1 (")
+	// Remove any parenthetical content (e.g. "Hbf (tief)" -> "Hbf")
+	name = regexp.MustCompile(`\s*\([^)]*\)`).ReplaceAllString(name, "")
 
-	// Add a space between ')' and any character if missing
-	// e.g. "Hbf (Frankfurt)Main" -> "Hbf (Frankfurt) Main"
-	name = regexp.MustCompile(`\)(\S)`).ReplaceAllString(name, ") $1")
-
-	// Replace hyphens with a space
+	// Replace hyphens with spaces (e.g. "Frankfurt-Süd" -> "Frankfurt Süd")
 	name = strings.ReplaceAll(name, "-", " ")
 
-	// Remove punctuation characters except whitespace and word characters
+	// Remove punctuation (excluding letters, numbers, and whitespace)
 	name = regexp.MustCompile(`[^\w\s]`).ReplaceAllString(name, "")
 
-	// Collapse multiple whitespace characters into a single space
+	// Remove platform/track/vehicle references (e.g. "Bussteig", "Gleis")
+	name = regexp.MustCompile(`\b(bussteig|gleis|bahnsteig|bus|zug)\b`).ReplaceAllString(name, "")
+
+	// Remove transit agency/operator names (e.g. "DB", "MVV")
+	name = regexp.MustCompile(`\b(db|mvv|vrr|rmv|bvg|sbb|oebb|sncf|trenitalia)\b`).ReplaceAllString(name, "")
+
+	// Normalize whitespace (collapse multiple spaces into one)
 	name = strings.Join(strings.Fields(name), " ")
 
-	// Replace common long terms with their abbreviations
+	// Replace common long terms with abbreviations
 	replacements := map[string]string{
-		// German terms you have:
+		// German terms
 		" hauptbahnhof": " hbf",
 		" bahnhof":      " bf",
 		"hauptbahnhof ": "hbf ",
@@ -55,7 +56,7 @@ func normalize(name string) string {
 		"strasse":       "str",
 		"platz":         "pl",
 
-		// English terms:
+		// English terms
 		" station":      " stn",
 		" street":       " st",
 		" avenue":       " ave",
@@ -83,9 +84,13 @@ func normalize(name string) string {
 		name = strings.ReplaceAll(name, k, v)
 	}
 
-	// Remove common public transport prefixes or suffixes (e.g. s, u, rb, tram, bus, bhf)
+	// Remove remaining transport-related abbreviations or prefixes
+	// (e.g. "S", "U", "RB", "RE", "Tram", "Bus", "Bhf")
 	re := regexp.MustCompile(`\b(s\+u|s|u|rb|re|tram|bus|bhf)\b[ \.]?`)
 	name = re.ReplaceAllString(name, "")
+
+	// Final whitespace cleanup
+	name = strings.Join(strings.Fields(name), " ")
 
 	return name
 }
@@ -122,7 +127,7 @@ func (f ExtendParentStops) Run(feed *gtfsparser.Feed) {
 		uf.InitKey(s.Id)
 	}
 
-	root := BuildKDTree(points, 0)
+	root := BuildKDTreeParallelLimited(points, 0)
 
 	for _, s := range feed.Stops {
 		if s.Parent_station != nil {
@@ -156,6 +161,70 @@ func (f ExtendParentStops) Run(feed *gtfsparser.Feed) {
 			stop.Parent_station = feed.Stops[parID]
 		}
 	}
+
+	// var mu sync.Mutex
+	// var wg sync.WaitGroup
+
+	// // Parallelize uf.Apply calls
+	// uf.Apply(func(key, parent string) {
+	// 	wg.Add(1)
+	// 	go func(key, parent string) {
+	// 		defer wg.Done()
+
+	// 		parID := "par::" + parent
+
+	// 		mu.Lock()
+	// 		_, ok := feed.Stops[parID]
+	// 		mu.Unlock()
+
+	// 		if !ok {
+	// 			mu.Lock()
+	// 			// Double check inside lock to avoid race
+	// 			if _, stillNotExist := feed.Stops[parID]; stillNotExist == false {
+	// 				orig := feed.Stops[parent]
+	// 				feed.Stops[parID] = createParentStopFrom(orig, parID)
+	// 			}
+	// 			mu.Unlock()
+	// 		}
+
+	// 		mu.Lock()
+	// 		stop := feed.Stops[key]
+	// 		stop.Parent_station = feed.Stops[parID]
+	// 		mu.Unlock()
+	// 	}(key, parent)
+	// })
+
+	// wg.Wait()
+
+	// // Parallelize the second loop with mutex on map writes
+	// for _, stop := range feed.Stops {
+	// 	if stop.Location_type == 0 && stop.Parent_station == nil {
+	// 		wg.Add(1)
+	// 		go func(stop *gtfs.Stop) {
+	// 			defer wg.Done()
+
+	// 			parID := "par::" + stop.Id
+
+	// 			mu.Lock()
+	// 			_, exists := feed.Stops[parID]
+	// 			mu.Unlock()
+
+	// 			if !exists {
+	// 				mu.Lock()
+	// 				if _, stillNotExist := feed.Stops[parID]; stillNotExist == false {
+	// 					feed.Stops[parID] = createParentStopFrom(stop, parID)
+	// 				}
+	// 				mu.Unlock()
+	// 			}
+
+	// 			mu.Lock()
+	// 			stop.Parent_station = feed.Stops[parID]
+	// 			mu.Unlock()
+	// 		}(stop)
+	// 	}
+	// }
+
+	// wg.Wait()
 
 	// Apply the union-find hierarchy to assign canonical parent stations
 	uf.Apply(func(key, parent string) {

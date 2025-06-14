@@ -7,6 +7,7 @@ package processors
 
 import (
 	"math"
+	"runtime"
 	"sort"
 )
 
@@ -25,6 +26,86 @@ type Node[T any] struct {
 	Left  *Node[T]
 	Right *Node[T]
 	Axis  int // 0 = lat, 1 = lon
+}
+
+func BuildKDTreeParallelLimited[T any](points []Point[T], maxThreads int) *Node[T] {
+	if maxThreads <= 0 {
+		maxThreads = runtime.NumCPU()
+	}
+	sem := make(chan struct{}, maxThreads)
+	return BuildKDTreeWithLimit(points, 0, sem)
+}
+
+// BuildKDTreeWithLimit builds a balanced KD-tree from a slice of points using a limit on parallelism.
+func BuildKDTreeWithLimit[T any](points []Point[T], depth int, sem chan struct{}) *Node[T] {
+	if len(points) == 0 {
+		return nil
+	}
+
+	axis := depth % 2
+
+	sort.SliceStable(points, func(i, j int) bool {
+		if axis == 0 {
+			return points[i].Lat < points[j].Lat
+		}
+		return points[i].Lon < points[j].Lon
+	})
+
+	median := len(points) / 2
+
+	node := &Node[T]{
+		Point: points[median],
+		Axis:  axis,
+	}
+
+	var left, right *Node[T]
+	done := make(chan struct{}, 2)
+
+	// Try to spawn goroutine for left subtree
+	if tryAcquire(sem) {
+		go func() {
+			defer release(sem)
+			left = BuildKDTreeWithLimit(points[:median], depth+1, sem)
+			done <- struct{}{}
+		}()
+	} else {
+		left = BuildKDTreeWithLimit(points[:median], depth+1, sem)
+		done <- struct{}{}
+	}
+
+	// Try to spawn goroutine for right subtree
+	if tryAcquire(sem) {
+		go func() {
+			defer release(sem)
+			right = BuildKDTreeWithLimit(points[median+1:], depth+1, sem)
+			done <- struct{}{}
+		}()
+	} else {
+		right = BuildKDTreeWithLimit(points[median+1:], depth+1, sem)
+		done <- struct{}{}
+	}
+
+	// Wait for both subtrees to finish
+	<-done
+	<-done
+
+	node.Left = left
+	node.Right = right
+
+	return node
+}
+
+func tryAcquire(sem chan struct{}) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func release(sem chan struct{}) {
+	<-sem
 }
 
 // BuildKDTree builds a balanced KD-tree from points slice
