@@ -90,8 +90,8 @@ func (sm *ShapeSnapper) snapTo(stop *gtfs.Stop, distT float32, shape *gtfs.Shape
 
 	if float64(distT) != math.NaN() {
 		for i := 1; i < len(shape.Points); i++ {
-			if shape.Points[i].Dist_traveled <= distT && i < len(shape.Points) - 1 && shape.Points[i+1].Dist_traveled >= distT {
-				d := (distT - shape.Points[i].Dist_traveled) / (shape.Points[i + 1].Dist_traveled - shape.Points[i].Dist_traveled)
+			if shape.Points[i].Dist_traveled <= distT && i < len(shape.Points)-1 && shape.Points[i+1].Dist_traveled >= distT {
+				d := (distT - shape.Points[i].Dist_traveled) / (shape.Points[i+1].Dist_traveled - shape.Points[i].Dist_traveled)
 
 				dx := shp[i+1][0] - shp[i][0]
 				dy := shp[i+1][1] - shp[i][1]

@@ -26,7 +26,7 @@ type DayType struct {
 // on which *excactly* the same trips are served. Similary day types are than aggreated,
 // and outfitted with an ID "<Weekday> (WW<list of calendar weeks served)".
 type ServiceNonOverlapper struct {
-	DayNames []string
+	DayNames     []string
 	YearWeekName string
 }
 
@@ -54,8 +54,8 @@ func (sm ServiceNonOverlapper) Run(feed *gtfsparser.Feed) {
 		}
 	}
 
-	for wd, _ := range days {
-		for day, _ := range days[wd] {
+	for wd := range days {
+		for day := range days[wd] {
 			sort.Slice(days[wd][day], func(i, j int) bool {
 				return days[wd][day][i].Id < days[wd][day][j].Id
 			})
@@ -63,7 +63,7 @@ func (sm ServiceNonOverlapper) Run(feed *gtfsparser.Feed) {
 	}
 
 	// collect day types
-	for wd, _ := range days {
+	for wd := range days {
 		for day, trips := range days[wd] {
 			found := false
 			for i, existing := range day_types[wd] {
@@ -82,7 +82,7 @@ func (sm ServiceNonOverlapper) Run(feed *gtfsparser.Feed) {
 			return len(day_types[wd][i].Dates) > len(day_types[wd][j].Dates)
 		})
 
-		for i, _ := range day_types[wd] {
+		for i := range day_types[wd] {
 			sort.Slice(day_types[wd][i].Dates, func(a, b int) bool {
 				return day_types[wd][i].Dates[a].GetTime().Before(day_types[wd][i].Dates[b].GetTime())
 			})
@@ -95,7 +95,7 @@ func (sm ServiceNonOverlapper) Run(feed *gtfsparser.Feed) {
 	feed.StopTimesAddFlds = make(map[string]map[string]map[int]string)
 
 	// write services
-	for wd, _ := range days {
+	for wd := range days {
 		for _, t := range day_types[wd] {
 			weeknums := make([]int, 0)
 			for _, d := range t.Dates {
@@ -108,7 +108,7 @@ func (sm ServiceNonOverlapper) Run(feed *gtfsparser.Feed) {
 			if len(day_types[wd]) > 1 {
 				id += " ("
 
-				for i, _ := range weeknums {
+				for i := range weeknums {
 					if i == 0 {
 						id += sm.YearWeekName + strconv.Itoa((weeknums[i]))
 						continue

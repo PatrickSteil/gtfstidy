@@ -12,5 +12,7 @@ require (
 
 require (
 	github.com/klauspost/compress v1.17.7 // indirect
+	github.com/mozillazg/go-unidecode v0.2.0 // indirect
+	github.com/paul-mannino/go-fuzzywuzzy v0.0.0-20241117160931-a1769aeb6b21 // indirect
 	github.com/valyala/fastjson v1.6.4 // indirect
 )

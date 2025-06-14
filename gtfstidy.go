@@ -9,17 +9,18 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/patrickbr/gtfsparser"
-	"github.com/patrickbr/gtfsparser/gtfs"
-	"github.com/patrickbr/gtfstidy/processors"
-	"github.com/patrickbr/gtfswriter"
-	"github.com/paulmach/go.geojson"
-	flag "github.com/spf13/pflag"
 	"io/ioutil"
 	"os"
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/patrickbr/gtfsparser"
+	"github.com/patrickbr/gtfsparser/gtfs"
+	"github.com/patrickbr/gtfstidy/processors"
+	"github.com/patrickbr/gtfswriter"
+	geojson "github.com/paulmach/go.geojson"
+	flag "github.com/spf13/pflag"
 )
 
 func getGtfsPoly(poly [][][]float64) gtfsparser.Polygon {
@@ -193,6 +194,9 @@ func main() {
 	useGoogleSupportedRouteTypes := flag.BoolP("google-supported-route-types", "", false, "Only use (extended) route types supported by Google")
 	motFilterStr := flag.StringP("keep-mots", "M", "", "comma-separated list of MOTs to keep, empty filter (default) keeps all")
 	motFilterNegStr := flag.StringP("drop-mots", "N", "", "comma-separated list of MOTs to drop")
+
+	extendParentStops := flag.BoolP("extend-parent-stops", "", false, "extend parent stops for each stop if not present")
+
 	help := flag.BoolP("help", "?", false, "this message")
 
 	flag.Parse()
@@ -669,6 +673,10 @@ func main() {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		} else if *useIDMinimizerChar {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
+		}
+
+		if *extendParentStops {
+			minzers = append(minzers, processors.ExtendParentStops{})
 		}
 
 		// do processing

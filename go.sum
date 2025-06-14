@@ -1,9 +1,13 @@
 github.com/klauspost/compress v1.17.7 h1:ehO88t2UGzQK66LMdE8tibEd1ErmzZjNEqWkjLAKQQg=
 github.com/klauspost/compress v1.17.7/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
+github.com/mozillazg/go-unidecode v0.2.0 h1:vFGEzAH9KSwyWmXCOblazEWDh7fOkpmy/Z4ArmamSUc=
+github.com/mozillazg/go-unidecode v0.2.0/go.mod h1:zB48+/Z5toiRolOZy9ksLryJ976VIwmDmpQ2quyt1aA=
 github.com/patrickbr/gtfsparser v0.0.0-20250109120112-0f616022f79d h1:Ebhf1XhABZWZLRxtwTPP4NpYN/rz2hR1VQ0omG0WGBI=
 github.com/patrickbr/gtfsparser v0.0.0-20250109120112-0f616022f79d/go.mod h1:WsjXLsxSQc+KfBJ7APQhk3yz+4DztzMYARQ+EfxKYSQ=
 github.com/patrickbr/gtfswriter v0.0.0-20240919073412-98e3602c6cd8 h1:xEQhft28izewbL3fnF10Yj8zSNu2r+lW157GQq+eaaY=
 github.com/patrickbr/gtfswriter v0.0.0-20240919073412-98e3602c6cd8/go.mod h1:zYAfZRXtDhc4Tq+LYrvyksefggNiViL2pKMRUrGvUbE=
+github.com/paul-mannino/go-fuzzywuzzy v0.0.0-20241117160931-a1769aeb6b21 h1:9wRPnUmjEwnJ38bLGsuRKn0lgqAAlkzIoe2UjdRXlWg=
+github.com/paul-mannino/go-fuzzywuzzy v0.0.0-20241117160931-a1769aeb6b21/go.mod h1:AMWhKRluACdXhJMWJiVOuqwmZvJOcdmjgbla/9zOKzE=
 github.com/paulmach/go.geojson v1.5.0 h1:7mhpMK89SQdHFcEGomT7/LuJhwhEgfmpWYVlVmLEdQw=
 github.com/paulmach/go.geojson v1.5.0/go.mod h1:DgdUy2rRVDDVgKqrjMe2vZAHMfhDTrjVKt3LmHIXGbU=
 github.com/spf13/pflag v1.0.5 h1:iy+VFUOCP1a+8yFto/drg2CJ5u0yRoB7fZw3DKv/JXA=

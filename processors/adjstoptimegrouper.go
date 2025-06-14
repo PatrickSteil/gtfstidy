@@ -29,14 +29,14 @@ func (m AdjacentStopTimeGrouper) Run(feed *gtfsparser.Feed) {
 		newSt := make(gtfs.StopTimes, 0)
 		newSt = append(newSt, t.StopTimes[0])
 
-		for i := 1; i < len(t.StopTimes);i++ {
+		for i := 1; i < len(t.StopTimes); i++ {
 			total++
 			if t.StopTimes[i-1].Stop() == t.StopTimes[i].Stop() && t.StopTimes[i-1].Arrival_time().Equals(t.StopTimes[i-1].Departure_time()) && t.StopTimes[i].Arrival_time().Equals(t.StopTimes[i].Departure_time()) && ((!t.StopTimes[i-1].HasDistanceTraveled() && !t.StopTimes[i].HasDistanceTraveled()) || (t.StopTimes[i-1].HasDistanceTraveled() && t.StopTimes[i].HasDistanceTraveled() && t.StopTimes[i-1].HasDistanceTraveled() == t.StopTimes[i].HasDistanceTraveled())) && t.StopTimes[i-1].Headsign() == t.StopTimes[i].Headsign() && t.StopTimes[i-1].Continuous_pickup() == t.StopTimes[i].Continuous_pickup() {
 
 				// update previous stop
-				newSt[len(newSt) - 1].SetDeparture_time(t.StopTimes[i].Departure_time())
-				newSt[len(newSt) - 1].SetDrop_off_type(t.StopTimes[i-1].Drop_off_type())
-				newSt[len(newSt) - 1].SetPickup_type(t.StopTimes[i].Pickup_type())
+				newSt[len(newSt)-1].SetDeparture_time(t.StopTimes[i].Departure_time())
+				newSt[len(newSt)-1].SetDrop_off_type(t.StopTimes[i-1].Drop_off_type())
+				newSt[len(newSt)-1].SetPickup_type(t.StopTimes[i].Pickup_type())
 				grouped++
 			} else {
 				newSt = append(newSt, t.StopTimes[i])
@@ -47,6 +47,6 @@ func (m AdjacentStopTimeGrouper) Run(feed *gtfsparser.Feed) {
 	}
 
 	fmt.Fprintf(os.Stdout, "done. (%d stop times dropped [%.2f%%])\n",
-	grouped,
-	100.0*float64(grouped)/(float64(total)))
+		grouped,
+		100.0*float64(grouped)/(float64(total)))
 }
