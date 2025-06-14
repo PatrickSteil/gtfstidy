@@ -36,7 +36,7 @@ func BuildKDTree[T any](points []Point[T], depth int) *Node[T] {
 	axis := depth % 2
 
 	// Sort points by current axis (lat or lon)
-	sort.Slice(points, func(i, j int) bool {
+	sort.SliceStable(points, func(i, j int) bool {
 		if axis == 0 {
 			return points[i].Lat < points[j].Lat
 		}

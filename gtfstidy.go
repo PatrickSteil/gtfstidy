@@ -667,7 +667,11 @@ func main() {
 		}
 
 		if *ensureParents {
-			minzers = append(minzers, processors.StopParentEnforcer{})
+			if *extendParentStops {
+				fmt.Printf("Skipping ensure-parents, as parents will be extended eitherway")
+			} else {
+				minzers = append(minzers, processors.StopParentEnforcer{})
+			}
 		}
 
 		if *useIDMinimizerNum {

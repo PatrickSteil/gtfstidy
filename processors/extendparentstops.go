@@ -17,11 +17,9 @@ import (
 	fuzzy "github.com/paul-mannino/go-fuzzywuzzy"
 )
 
-// https://github.com/dhconnelly/rtreego
-var REC_TOL = 0.01
 var TOL_IS_SAME = 85
 
-const radiusKm = 1.0
+const radiusKm = 0.5
 
 func normalize(name string) string {
 	// Remove diacritics (e.g. ü -> u)
@@ -49,12 +47,36 @@ func normalize(name string) string {
 
 	// Replace common long terms with their abbreviations
 	replacements := map[string]string{
+		// German terms you have:
 		" hauptbahnhof": " hbf",
 		" bahnhof":      " bf",
 		"hauptbahnhof ": "hbf ",
 		"bahnhof ":      "bf ",
 		"strasse":       "str",
 		"platz":         "pl",
+
+		// English terms:
+		" station":      " stn",
+		" street":       " st",
+		" avenue":       " ave",
+		" boulevard":    " blvd",
+		" road":         " rd",
+		" drive":        " dr",
+		" court":        " ct",
+		" square":       " sq",
+		" parkway":      " pkwy",
+		" highway":      " hwy",
+		" circle":       " cir",
+		" lane":         " ln",
+		" place":        " pl",
+		" terrace":      " ter",
+		" expressway":   " expy",
+		" junction":     " jct",
+		" intersection": " int",
+		" terminal":     " term",
+		" airport":      " apt",
+		" downtown":     " dtwn",
+		" ferry":        " fry",
 	}
 
 	for k, v := range replacements {
@@ -66,6 +88,17 @@ func normalize(name string) string {
 	name = re.ReplaceAllString(name, "")
 
 	return name
+}
+
+func createParentStopFrom(orig *gtfs.Stop, id string) *gtfs.Stop {
+	return &gtfs.Stop{
+		Id:            id,
+		Name:          orig.Name,
+		Lat:           orig.Lat,
+		Lon:           orig.Lon,
+		Location_type: 1,
+		Timezone:      orig.Timezone,
+	}
 }
 
 // should two names be considered "the same"
@@ -83,23 +116,19 @@ func (f ExtendParentStops) Run(feed *gtfsparser.Feed) {
 
 	uf := NewUnionFind[string]()
 
-	// Build KD-tree of stops
-	var root *Node[*gtfs.Stop]
+	points := make([]Point[*gtfs.Stop], 0, len(feed.Stops))
 	for _, s := range feed.Stops {
-		root = Insert(root, Point[*gtfs.Stop]{Lat: float64(s.Lat), Lon: float64(s.Lon), Data: s}, 0)
+		points = append(points, Point[*gtfs.Stop]{Lat: float64(s.Lat), Lon: float64(s.Lon), Data: s})
 		uf.InitKey(s.Id)
-
-		if s.Parent_station != nil {
-			uf.MarkAsParent(s.Parent_station.Id)
-		}
 	}
+
+	root := BuildKDTree(points, 0)
 
 	for _, s := range feed.Stops {
 		if s.Parent_station != nil {
 			uf.UnionSet(s.Id, s.Parent_station.Id)
 		}
 	}
-
 	prev := uf.NumDisjointSets()
 
 	for _, s := range feed.Stops {
@@ -108,24 +137,48 @@ func (f ExtendParentStops) Run(feed *gtfsparser.Feed) {
 		SearchRange(root, query, radiusKm, 0, &results)
 
 		norm := normalize(s.Name)
-
-		// fmt.Printf("From %v (%v)\n", s.Name, norm)
-
 		for _, p := range results {
 			o := p.Data
-			// fmt.Printf("> To %v (%v)\n", o.Name, normalize(o.Name))
-
 			if ConsiderSame(norm, normalize(o.Name), TOL_IS_SAME) {
 				uf.UnionSet(s.Id, o.Id)
 			}
 		}
 	}
 
-	uf.Apply(func(key, parent string) {
-		if key != parent {
-			feed.Stops[key].Parent_station = feed.Stops[parent]
+	// First, ensure all existing parent_station references are remapped to "par::<id>" versions
+	for _, stop := range feed.Stops {
+		if stop.Parent_station != nil {
+			parent := stop.Parent_station
+			parID := "par::" + parent.Id
+			if _, exists := feed.Stops[parID]; !exists {
+				feed.Stops[parID] = createParentStopFrom(stop, parID)
+			}
+			stop.Parent_station = feed.Stops[parID]
 		}
+	}
+
+	// Apply the union-find hierarchy to assign canonical parent stations
+	uf.Apply(func(key, parent string) {
+		stop := feed.Stops[key]
+		parID := "par::" + parent
+
+		if _, ok := feed.Stops[parID]; !ok {
+			orig := feed.Stops[parent]
+			feed.Stops[parID] = createParentStopFrom(orig, parID)
+		}
+		stop.Parent_station = feed.Stops[parID]
 	})
+
+	// Ensure all stops have a parent station
+	for _, stop := range feed.Stops {
+		if stop.Location_type == 0 && stop.Parent_station == nil {
+			parID := "par::" + stop.Id
+			if _, exists := feed.Stops[parID]; !exists {
+				feed.Stops[parID] = createParentStopFrom(stop, parID)
+			}
+			stop.Parent_station = feed.Stops[parID]
+		}
+	}
 
 	after := uf.NumDisjointSets()
 

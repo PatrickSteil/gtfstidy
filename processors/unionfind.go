@@ -12,17 +12,14 @@ type UnionFind[T comparable] struct {
 	rank    map[T]int
 	size    map[T]int
 	numSets int
-
-	isPreferredParent map[T]bool
 }
 
 func NewUnionFind[T comparable]() *UnionFind[T] {
 	return &UnionFind[T]{
-		parent:            make(map[T]T),
-		rank:              make(map[T]int),
-		size:              make(map[T]int),
-		numSets:           0,
-		isPreferredParent: make(map[T]bool),
+		parent:  make(map[T]T),
+		rank:    make(map[T]int),
+		size:    make(map[T]int),
+		numSets: 0,
 	}
 }
 
@@ -32,10 +29,6 @@ func (uf *UnionFind[T]) InitKey(k T) {
 	uf.size[k] = 1
 
 	uf.numSets += 1
-}
-
-func (uf *UnionFind[T]) MarkAsParent(key T) {
-	uf.isPreferredParent[key] = true
 }
 
 func (uf *UnionFind[T]) FindSet(i T) T {
@@ -58,23 +51,14 @@ func (uf *UnionFind[T]) UnionSet(x, y T) {
 	}
 
 	uf.numSets--
-
-	if uf.isPreferredParent[xRoot] && !uf.isPreferredParent[yRoot] {
+	if uf.rank[xRoot] > uf.rank[yRoot] {
 		uf.parent[yRoot] = xRoot
 		uf.size[xRoot] += uf.size[yRoot]
-	} else if uf.isPreferredParent[yRoot] && !uf.isPreferredParent[xRoot] {
+	} else {
 		uf.parent[xRoot] = yRoot
 		uf.size[yRoot] += uf.size[xRoot]
-	} else {
-		if uf.rank[xRoot] > uf.rank[yRoot] {
-			uf.parent[yRoot] = xRoot
-			uf.size[xRoot] += uf.size[yRoot]
-		} else {
-			uf.parent[xRoot] = yRoot
-			uf.size[yRoot] += uf.size[xRoot]
-			if uf.rank[xRoot] == uf.rank[yRoot] {
-				uf.rank[yRoot]++
-			}
+		if uf.rank[xRoot] == uf.rank[yRoot] {
+			uf.rank[yRoot]++
 		}
 	}
 }
