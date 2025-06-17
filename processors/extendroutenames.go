@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/patrickbr/gtfsparser"
 	gtfs "github.com/patrickbr/gtfsparser/gtfs"
@@ -27,11 +28,7 @@ func NumTrips(f *gtfs.Frequency) int {
 
 func TopLevelStop(stop *gtfs.Stop, feed *gtfsparser.Feed) *gtfs.Stop {
 	for stop.Parent_station != nil {
-		parent, ok := feed.Stops[stop.Parent_station.Id]
-		if !ok {
-			break
-		}
-		stop = parent
+		stop = stop.Parent_station
 	}
 	return stop
 }
@@ -64,16 +61,18 @@ type ExtendRouteName struct {
 func (f ExtendRouteName) Run(feed *gtfsparser.Feed) {
 	fmt.Fprintf(os.Stdout, "Extending route names (short and long names) ... ")
 
-	const K = 5
+	const K = 4
 	workerCount := runtime.NumCPU()
 
-	// Step 1: Compute stop importance once
 	stopImportanceMap := make(map[*gtfs.Stop]int)
 	for _, s := range feed.Stops {
 		stopImportanceMap[s] = 0
 	}
+
 	for _, t := range feed.Trips {
 		amount := 1
+
+		// If this trip has frequencies, we add the number of encoded trips to the amount
 		if t.Frequencies != nil {
 			for _, freq := range *t.Frequencies {
 				amount += NumTrips(freq)
@@ -88,6 +87,8 @@ func (f ExtendRouteName) Run(feed *gtfsparser.Feed) {
 	routesCh := make(chan *gtfs.Route)
 	var wg sync.WaitGroup
 
+	var newRouteNames atomic.Uint64
+
 	for w := 0; w < workerCount; w++ {
 		wg.Add(1)
 		go func() {
@@ -98,6 +99,10 @@ func (f ExtendRouteName) Run(feed *gtfsparser.Feed) {
 				}
 
 				orderedStops := []*gtfs.Stop{}
+
+				// TODO
+				// this is ugly
+				// maybe another way to map Route-> trips
 
 				for _, trip := range feed.Trips {
 					if trip.Route != route {
@@ -142,6 +147,8 @@ func (f ExtendRouteName) Run(feed *gtfsparser.Feed) {
 					for i := 1; i < len(stopNames); i++ {
 						route.Long_name += " - " + stopNames[i]
 					}
+
+					newRouteNames.Add(1)
 				}
 			}
 		}()
@@ -153,5 +160,10 @@ func (f ExtendRouteName) Run(feed *gtfsparser.Feed) {
 	close(routesCh)
 
 	wg.Wait()
-	fmt.Fprintf(os.Stdout, "done.\n")
+
+	if newRouteNames.Load() > 0 {
+		fmt.Fprintf(os.Stdout, "(+%d route_long_names [+%.2f%%]) done.\n", newRouteNames.Load(), 100*(float64(newRouteNames.Load())/float64(len(feed.Routes))))
+	} else {
+		fmt.Fprintf(os.Stdout, "done.\n")
+	}
 }
