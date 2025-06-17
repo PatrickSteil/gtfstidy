@@ -196,6 +196,7 @@ func main() {
 	motFilterNegStr := flag.StringP("drop-mots", "N", "", "comma-separated list of MOTs to drop")
 
 	extendTripHeadsigns := flag.BoolP("extend-trip-headsigns", "", false, "extend trip headsigns by last stop if not present")
+	extendRouteNames := flag.BoolP("extend-route-names", "", false, "extend route names by last stop if not present")
 	extendParentStops := flag.BoolP("extend-parent-stops", "", false, "extend parent stops for each stop if not present")
 
 	help := flag.BoolP("help", "?", false, "this message")
@@ -680,12 +681,16 @@ func main() {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		}
 
-		if *extendTripHeadsigns {
-			minzers = append(minzers, processors.ExtendTripHeadSign{})
-		}
-
 		if *extendParentStops {
 			minzers = append(minzers, processors.ExtendParentStops{})
+		}
+
+		if *extendRouteNames {
+			minzers = append(minzers, processors.ExtendRouteName{})
+		}
+
+		if *extendTripHeadsigns {
+			minzers = append(minzers, processors.ExtendTripHeadSign{})
 		}
 
 		// do processing
