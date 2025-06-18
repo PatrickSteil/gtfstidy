@@ -59,28 +59,54 @@ type ExtendRouteName struct {
 }
 
 func (f ExtendRouteName) Run(feed *gtfsparser.Feed) {
-	fmt.Fprintf(os.Stdout, "Extending route names (short and long names) ... ")
+	fmt.Fprintf(os.Stdout, "Extending route names ... ")
 
 	const K = 4
 	workerCount := runtime.NumCPU()
 
-	stopImportanceMap := make(map[*gtfs.Stop]int)
+	var stopImportanceMap sync.Map
 	for _, s := range feed.Stops {
-		stopImportanceMap[s] = 0
+		stopImportanceMap.Store(s, new(atomic.Int32))
+	}
+
+	tripCh := make(chan *gtfs.Trip)
+	var tripWg sync.WaitGroup
+
+	for w := 0; w < workerCount; w++ {
+		tripWg.Add(1)
+		go func() {
+			defer tripWg.Done()
+			for t := range tripCh {
+				amount := 1
+				if t.Frequencies != nil {
+					for _, freq := range *t.Frequencies {
+						amount += NumTrips(freq)
+					}
+				}
+				for _, st := range t.StopTimes {
+					parentStop := TopLevelStop(st.Stop(), feed)
+					if v, ok := stopImportanceMap.Load(parentStop); ok {
+						v.(*atomic.Int32).Add(int32(amount))
+					}
+				}
+			}
+		}()
 	}
 
 	for _, t := range feed.Trips {
-		amount := 1
+		tripCh <- t
+	}
+	close(tripCh)
+	tripWg.Wait()
 
-		// If this trip has frequencies, we add the number of encoded trips to the amount
-		if t.Frequencies != nil {
-			for _, freq := range *t.Frequencies {
-				amount += NumTrips(freq)
-			}
-		}
-		for _, st := range t.StopTimes {
-			parentStop := TopLevelStop(st.Stop(), feed)
-			stopImportanceMap[parentStop] += amount
+	oneTripOfRoute := make(map[string]*gtfs.Trip)
+
+	for _, t := range feed.Trips {
+		// set the trip as representative of its route
+		_, ok := oneTripOfRoute[t.Route.Id]
+
+		if !ok {
+			oneTripOfRoute[t.Route.Id] = t
 		}
 	}
 
@@ -100,41 +126,37 @@ func (f ExtendRouteName) Run(feed *gtfsparser.Feed) {
 
 				orderedStops := []*gtfs.Stop{}
 
-				// TODO
-				// this is ugly
-				// maybe another way to map Route-> trips
-
-				for _, trip := range feed.Trips {
-					if trip.Route != route {
-						continue
-					}
-					for _, st := range trip.StopTimes {
-						stop := TopLevelStop(st.Stop(), feed)
-						orderedStops = append(orderedStops, stop)
-					}
-					break
+				trip := oneTripOfRoute[route.Id]
+				for _, st := range trip.StopTimes {
+					stop := TopLevelStop(st.Stop(), feed)
+					orderedStops = append(orderedStops, stop)
 				}
 
-				h := &StopHeap{}
-				heap.Init(h)
+				h := make(StopHeap, 0, K+1)
+				heap.Init(&h)
 
 				for idx, stop := range orderedStops {
-					ss := ScoredStop{Stop: stop, Importance: stopImportanceMap[stop], Index: idx}
-					heap.Push(h, ss)
+					importance := 0
+					if v, ok := stopImportanceMap.Load(stop); ok {
+						importance = int(v.(*atomic.Int32).Load())
+					}
+					ss := ScoredStop{Stop: stop, Importance: importance, Index: idx}
+
+					heap.Push(&h, ss)
 					if h.Len() > K {
-						heap.Pop(h)
+						heap.Pop(&h)
 					}
 				}
 
 				topStops := make([]ScoredStop, h.Len())
 				for i := len(topStops) - 1; i >= 0; i-- {
-					topStops[i] = heap.Pop(h).(ScoredStop)
+					topStops[i] = heap.Pop(&h).(ScoredStop)
 				}
 				sort.SliceStable(topStops, func(i, j int) bool {
 					return topStops[i].Index < topStops[j].Index
 				})
 
-				stopNames := []string{}
+				stopNames := make([]string, 0, K)
 				for _, s := range topStops {
 					name := s.Stop.Name
 					if s.Stop.Parent_station != nil {
