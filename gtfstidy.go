@@ -563,6 +563,10 @@ func main() {
 			minzers = append(minzers, processors.AgencyDuplicateRemover{})
 		}
 
+		if *ensureParents {
+			minzers = append(minzers, processors.StopParentEnforcer{})
+		}
+
 		if *useStopAverager {
 			minzers = append(minzers, processors.StopParentAverager{
 				MaxDist: 100,
@@ -679,10 +683,6 @@ func main() {
 
 		if *useCalDatesRemover {
 			minzers = append(minzers, processors.ServiceCalDatesRem{})
-		}
-
-		if *ensureParents {
-			minzers = append(minzers, processors.StopParentEnforcer{})
 		}
 
 		if *useIDMinimizerNum {
