@@ -570,6 +570,10 @@ func main() {
 			minzers = append(minzers, processors.AgencyDuplicateRemover{})
 		}
 
+		if *ensureParents {
+			minzers = append(minzers, processors.StopParentEnforcer{})
+		}
+
 		if *useStopAverager {
 			minzers = append(minzers, processors.StopParentAverager{
 				MaxDist: 100,
@@ -699,6 +703,7 @@ func main() {
 			}
 			minzers = append(minzers, processors.HierachicalStopIDs{Prefix: *idPrefix, Base: base})
 		}
+
 		if *useIDMinimizerNum {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds || *useHierarchicalStopIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		} else if *useIDMinimizerChar {
