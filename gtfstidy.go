@@ -175,6 +175,7 @@ func main() {
 	keepFields := flag.BoolP("keep-additional-fields", "F", false, "keep all non-GTFS fields from the input")
 	dropTooFast := flag.BoolP("drop-too-fast-trips", "", false, "drop trips that are too fast to realistically occur")
 	useRedStopMinimizer := flag.BoolP("remove-red-stops", "P", false, "remove stop and level duplicates")
+	useRedParentStopsMinimizer := flag.BoolP("remove-only-red-parent-stops", "", false, "remove only parent-station and level duplicates")
 	useRedTripMinimizer := flag.BoolP("remove-red-trips", "I", false, "remove trip duplicates")
 	useRedTripMinimizerFuzzyRoute := flag.BoolP("red-trips-fuzzy", "", false, "only check MOT of routes for trip duplicate removal")
 	redTripMinimizerAggressive := flag.BoolP("red-trips-aggressive", "", false, "aggressive merging of equal trips, even if this would create complicated services")
@@ -580,6 +581,7 @@ func main() {
 				DistThresholdStop:    5.0,
 				DistThresholdStation: 50,
 				Fuzzy:                *useRedStopsMinimizerFuzzy,
+				OnlyParentStations:   *useRedParentStopsMinimizer,
 			})
 		}
 
