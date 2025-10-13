@@ -200,6 +200,9 @@ func main() {
 	useGoogleSupportedRouteTypes := flag.BoolP("google-supported-route-types", "", false, "Only use (extended) route types supported by Google")
 	motFilterStr := flag.StringP("keep-mots", "M", "", "comma-separated list of MOTs to keep, empty filter (default) keeps all")
 	motFilterNegStr := flag.StringP("drop-mots", "N", "", "comma-separated list of MOTs to drop")
+
+	useHierarchicalStopIds := flag.BoolP("hierarchical-stop-ids", "", false, "Use hierarchical stop IDs (prefix + parent:child-number)")
+
 	help := flag.BoolP("help", "?", false, "this message")
 
 	flag.Parse()
@@ -686,10 +689,17 @@ func main() {
 			minzers = append(minzers, processors.StopParentEnforcer{})
 		}
 
+		if !*keepStationIds && *useHierarchicalStopIds {
+			base := 10
+			if *useIDMinimizerChar {
+				base = 16
+			}
+			minzers = append(minzers, processors.HierachicalStopIDs{Prefix: *idPrefix, Base: base})
+		}
 		if *useIDMinimizerNum {
-			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
+			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds || *useHierarchicalStopIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		} else if *useIDMinimizerChar {
-			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
+			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds || *useHierarchicalStopIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		}
 
 		if *useStableStopIds {
