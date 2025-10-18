@@ -9,14 +9,15 @@ package processors
 import (
 	"container/heap"
 	"fmt"
-	"github.com/patrickbr/gtfsparser"
-	gtfs "github.com/patrickbr/gtfsparser/gtfs"
 	"math"
 	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/patrickbr/gtfsparser"
+	gtfs "github.com/patrickbr/gtfsparser/gtfs"
 )
 
 // A StopCluster contains stops in .Childs which are grouped by stops in
@@ -77,6 +78,11 @@ type StopReclusterer struct {
 // Run this StopReclusterer on some feed
 func (m StopReclusterer) Run(feed *gtfsparser.Feed) {
 	fmt.Fprintf(os.Stdout, "Reclustering stops... ")
+
+	if len(feed.Stops) < 1 {
+		fmt.Fprintf(os.Stdout, " done, nothing to do!\n")
+		return
+	}
 
 	m.splitregex = regexp.MustCompile(`[^\pL]`)
 
