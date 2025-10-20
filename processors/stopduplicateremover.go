@@ -22,7 +22,6 @@ type StopDuplicateRemover struct {
 	DistThresholdStop    float64
 	DistThresholdStation float64
 	Fuzzy                bool
-	OnlyParentStations   bool
 }
 
 // Run this StopDuplicateRemover on some feed
@@ -100,11 +99,7 @@ func (sdr StopDuplicateRemover) Run(feed *gtfsparser.Feed) {
 		}
 
 		i := 0
-
 		for _, s := range feed.Stops {
-			if sdr.OnlyParentStations && s.Location_type != 1 {
-				continue
-			}
 			i += 1
 			if _, ok := proced[s]; ok {
 				continue
@@ -123,6 +118,7 @@ func (sdr StopDuplicateRemover) Run(feed *gtfsparser.Feed) {
 				proced[s] = true
 			}
 		}
+
 	}
 
 	fmt.Fprintf(os.Stdout, "done. (-%d stops [-%.2f%%])\n", (bef - len(feed.Stops)), 100.0*float64(bef-len(feed.Stops))/float64(bef))
@@ -130,9 +126,6 @@ func (sdr StopDuplicateRemover) Run(feed *gtfsparser.Feed) {
 
 // Returns the feed's stops that are equivalent to stop
 func (sdr StopDuplicateRemover) getEquivalentStops(stop *gtfs.Stop, feed *gtfsparser.Feed, chunks [][]*gtfs.Stop) []*gtfs.Stop {
-	if sdr.OnlyParentStations && stop.Location_type != 1 {
-		return nil
-	}
 	rets := make([][]*gtfs.Stop, len(chunks))
 	sem := make(chan empty, len(chunks))
 
@@ -145,10 +138,6 @@ func (sdr StopDuplicateRemover) getEquivalentStops(stop *gtfs.Stop, feed *gtfspa
 				if _, ok := feed.Stops[s.Id]; !ok {
 					continue
 				}
-				if sdr.OnlyParentStations && stop.Location_type != 1 {
-					continue
-				}
-
 				if sdr.stopEquals(s, stop, feed) {
 					rets[j] = append(rets[j], s)
 				}
@@ -388,9 +377,6 @@ func (sdr StopDuplicateRemover) numColons(str string) int {
 
 // Check if two stops are equal, distances under 1 m count as equal
 func (sdr StopDuplicateRemover) stopEquals(a *gtfs.Stop, b *gtfs.Stop, feed *gtfsparser.Feed) bool {
-	if sdr.OnlyParentStations && (a.Location_type != 1 || b.Location_type != 1) {
-		return false
-	}
 	addFldsEq := true
 
 	if !sdr.Fuzzy {

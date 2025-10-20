@@ -585,7 +585,6 @@ func main() {
 				DistThresholdStop:    5.0,
 				DistThresholdStation: 50,
 				Fuzzy:                *useRedStopsMinimizerFuzzy,
-				OnlyParentStations:   *useRedParentStopsMinimizer,
 			})
 		}
 
@@ -690,10 +689,6 @@ func main() {
 
 		if *useCalDatesRemover {
 			minzers = append(minzers, processors.ServiceCalDatesRem{})
-		}
-
-		if *ensureParents {
-			minzers = append(minzers, processors.StopParentEnforcer{})
 		}
 
 		if !*keepStationIds && *useHierarchicalStopIds {
