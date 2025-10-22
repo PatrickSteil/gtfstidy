@@ -7,20 +7,93 @@
 package main
 
 import (
+	"crypto/sha1"
 	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+
 	"github.com/patrickbr/gtfsparser"
 	"github.com/patrickbr/gtfsparser/gtfs"
 	"github.com/patrickbr/gtfstidy/processors"
 	"github.com/patrickbr/gtfswriter"
-	"github.com/paulmach/go.geojson"
+	geojson "github.com/paulmach/go.geojson"
 	flag "github.com/spf13/pflag"
-	"io/ioutil"
-	"os"
-	"path"
-	"strconv"
-	"strings"
 )
+
+func sanitizeFileName(name string) string {
+	name = strings.ReplaceAll(name, ":", "_")
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "?", "_")
+	name = strings.ReplaceAll(name, "&", "_")
+	name = strings.ReplaceAll(name, "=", "_")
+	return name
+}
+
+// DownloadGTFSFeed downloads a GTFS feed and saves it locally under a unique name derived from its URL.
+// Returns the local file path.
+func DownloadGTFSFeed(gtfsURL string, destDir string) (string, error) {
+	parsedURL, err := url.Parse(gtfsURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %v", err)
+	}
+
+	host := parsedURL.Hostname()
+	base := path.Base(parsedURL.Path)
+	if base == "" || base == "/" || !strings.Contains(base, ".") {
+		base = "gtfs.zip"
+	}
+
+	// Add a hash to ensure uniqueness (e.g., when multiple URLs end in gtfs.zip)
+	h := sha1.New()
+	h.Write([]byte(gtfsURL))
+	hash := fmt.Sprintf("%x", h.Sum(nil))[:8]
+
+	fileName := sanitizeFileName(fmt.Sprintf("%s_%s_%s", host, strings.TrimSuffix(base, ".zip"), hash)) + ".zip"
+
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create destination directory: %v", err)
+	}
+
+	filePath := filepath.Join(destDir, fileName)
+
+	if _, err := os.Stat(filePath); err == nil {
+		fmt.Printf("Feed already exists locally at %s — skipping download.\n", filePath)
+		return filePath, nil
+	}
+
+	fmt.Printf("Downloading GTFS feed from %s... ", gtfsURL)
+	resp, err := http.Get(gtfsURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d while downloading %s", resp.StatusCode, gtfsURL)
+	}
+
+	out, err := os.Create(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create file: %v", err)
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to save file: %v", err)
+	}
+
+	fmt.Printf("Saved GTFS feed to %s", filePath)
+	return filePath, nil
+}
 
 func getGtfsPoly(poly [][][]float64) gtfsparser.Polygon {
 	outer := make([][2]float64, len(poly[0]))
@@ -454,6 +527,17 @@ func main() {
 			if opts.ShowWarnings {
 				fmt.Fprintf(os.Stdout, "\n")
 			}
+
+			if strings.HasPrefix(gtfsPath, "http://") || strings.HasPrefix(gtfsPath, "https://") {
+				gtfsPath, err = DownloadGTFSFeed(gtfsPath, "downloads")
+				defer os.Remove(gtfsPath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "\nError while downloading GTFS feed:\n")
+					fmt.Fprintln(os.Stderr, e.Error())
+					os.Exit(1)
+				}
+			}
+
 			e = locFeed.Parse(gtfsPath)
 
 			if e != nil {
@@ -477,6 +561,15 @@ func main() {
 		fmt.Fprintf(os.Stdout, "Parsing GTFS feed in '%s' ...", gtfsPath)
 		if opts.ShowWarnings {
 			fmt.Fprintf(os.Stdout, "\n")
+		}
+		if strings.HasPrefix(gtfsPath, "http://") || strings.HasPrefix(gtfsPath, "https://") {
+			gtfsPath, err = DownloadGTFSFeed(gtfsPath, "downlaods")
+			defer os.Remove(gtfsPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "\nError while downloading GTFS feed:\n")
+				fmt.Fprintln(os.Stderr, e.Error())
+				os.Exit(1)
+			}
 		}
 		if len(gtfsPaths) > 1 {
 			prefix := strconv.FormatInt(int64(i), 10) + "#"
