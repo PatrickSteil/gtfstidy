@@ -9,17 +9,18 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/patrickbr/gtfsparser"
-	"github.com/patrickbr/gtfsparser/gtfs"
-	"github.com/patrickbr/gtfstidy/processors"
-	"github.com/patrickbr/gtfswriter"
-	"github.com/paulmach/go.geojson"
-	flag "github.com/spf13/pflag"
 	"io/ioutil"
 	"os"
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/patrickbr/gtfsparser"
+	"github.com/patrickbr/gtfsparser/gtfs"
+	"github.com/patrickbr/gtfstidy/processors"
+	"github.com/patrickbr/gtfswriter"
+	geojson "github.com/paulmach/go.geojson"
+	flag "github.com/spf13/pflag"
 )
 
 func getGtfsPoly(poly [][][]float64) gtfsparser.Polygon {
@@ -177,6 +178,8 @@ func main() {
 	useRedTripMinimizer := flag.BoolP("remove-red-trips", "I", false, "remove trip duplicates")
 	useRedTripMinimizerFuzzyRoute := flag.BoolP("red-trips-fuzzy", "", false, "only check MOT of routes for trip duplicate removal")
 	redTripMinimizerAggressive := flag.BoolP("red-trips-aggressive", "", false, "aggressive merging of equal trips, even if this would create complicated services")
+
+	useStableStopIds := flag.BoolP("stable-stop-ids", "", false, "compute stable stop ids using geohash and normalized stop ames")
 
 	useRedStopsMinimizerFuzzy := flag.BoolP("red-stops-fuzzy", "", false, "fuzzy station match for station duplicate removal")
 	useRedAgencyMinimizer := flag.BoolP("remove-red-agencies", "A", false, "remove agency duplicates")
@@ -686,6 +689,10 @@ func main() {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		} else if *useIDMinimizerChar {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
+		}
+
+		if *useStableStopIds {
+			minzers = append(minzers, processors.StableStopIdProcessors{Precision: 6})
 		}
 
 		// do processing
