@@ -22,16 +22,16 @@ type HierachicalStopIDs struct {
 func (minimizer HierachicalStopIDs) Run(feed *gtfsparser.Feed) {
 	fmt.Fprintf(os.Stdout, "Encoding stop_ids via parent_station ids ... ")
 
-	parentNewIDs := int64(0)
+	countParentStations := 0
 
 	for _, s := range feed.Stops {
 		if s.Parent_station == nil {
-			s.Id = minimizer.Prefix + strconv.FormatInt(parentNewIDs, minimizer.Base)
-			parentNewIDs++
+			s.Id = minimizer.Prefix + s.Id
+			countParentStations += 1
 		}
 	}
 
-	numChildOfParent := make(map[string]int64, parentNewIDs)
+	numChildOfParent := make(map[string]int64, countParentStations)
 	for _, s := range feed.Stops {
 		if s.Parent_station != nil {
 			nr := numChildOfParent[s.Parent_station.Id]

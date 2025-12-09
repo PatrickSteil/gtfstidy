@@ -690,6 +690,17 @@ func main() {
 			minzers = append(minzers, processors.ServiceCalDatesRem{})
 		}
 
+		if *useStableStopIds {
+			if *stableStopIdPrecision < 1 {
+				*stableStopIdPrecision = 1
+			}
+
+			if *stableStopIdPrecision > 9 {
+				*stableStopIdPrecision = 9
+			}
+			minzers = append(minzers, processors.StableStopIdProcessors{Precision: *stableStopIdPrecision, HashLength: 12})
+		}
+
 		if !*keepStationIds && *useHierarchicalStopIds {
 			base := 10
 			if *useIDMinimizerChar {
@@ -702,17 +713,6 @@ func main() {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds || *useHierarchicalStopIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		} else if *useIDMinimizerChar {
 			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds || *useHierarchicalStopIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
-		}
-
-		if *useStableStopIds {
-			if *stableStopIdPrecision < 1 {
-				*stableStopIdPrecision = 1
-			}
-
-			if *stableStopIdPrecision > 9 {
-				*stableStopIdPrecision = 9
-			}
-			minzers = append(minzers, processors.StableStopIdProcessors{Precision: *stableStopIdPrecision, HashLength: 12})
 		}
 
 		// do processing
