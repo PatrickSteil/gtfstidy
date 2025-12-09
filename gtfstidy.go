@@ -179,7 +179,8 @@ func main() {
 	useRedTripMinimizerFuzzyRoute := flag.BoolP("red-trips-fuzzy", "", false, "only check MOT of routes for trip duplicate removal")
 	redTripMinimizerAggressive := flag.BoolP("red-trips-aggressive", "", false, "aggressive merging of equal trips, even if this would create complicated services")
 
-	useStableStopIds := flag.BoolP("stable-stop-ids", "", false, "compute stable stop ids using geohash and normalized stop ames")
+	useStableStopIds := flag.BoolP("stable-stop-ids-parents", "", false, "compute stable stop ids for parent stations using geohash and normalized stop ames")
+	stableStopIdPrecision := flag.IntP("geohash-precision", "", 6, "Precision (1-9) for the geohash")
 
 	useRedStopsMinimizerFuzzy := flag.BoolP("red-stops-fuzzy", "", false, "fuzzy station match for station duplicate removal")
 	useRedAgencyMinimizer := flag.BoolP("remove-red-agencies", "A", false, "remove agency duplicates")
@@ -692,7 +693,14 @@ func main() {
 		}
 
 		if *useStableStopIds {
-			minzers = append(minzers, processors.StableStopIdProcessors{Precision: 6})
+			if *stableStopIdPrecision < 1 {
+				*stableStopIdPrecision = 1
+			}
+
+			if *stableStopIdPrecision > 9 {
+				*stableStopIdPrecision = 9
+			}
+			minzers = append(minzers, processors.StableStopIdProcessors{Precision: *stableStopIdPrecision})
 		}
 
 		// do processing
