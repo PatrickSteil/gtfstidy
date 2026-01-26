@@ -700,7 +700,7 @@ func main() {
 			if *stableStopIdPrecision > 9 {
 				*stableStopIdPrecision = 9
 			}
-			minzers = append(minzers, processors.StableStopIdProcessors{Precision: *stableStopIdPrecision})
+			minzers = append(minzers, processors.StableStopIdProcessors{Precision: *stableStopIdPrecision, HashLength: 12})
 		}
 
 		// do processing

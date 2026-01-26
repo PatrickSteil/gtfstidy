@@ -1,6 +1,8 @@
 package processors
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -76,8 +78,18 @@ func applyMultilingualReplacements(name string) string {
 	return n
 }
 
+func hashAndTrim(s string, length int) string {
+	h := sha1.Sum([]byte(s))
+	hexStr := hex.EncodeToString(h[:])
+	if length > len(hexStr) {
+		length = len(hexStr)
+	}
+	return hexStr[:length]
+}
+
 type StableStopIdProcessors struct {
-	Precision int
+	Precision  int
+	HashLength int
 }
 
 func (m StableStopIdProcessors) Run(feed *gtfsparser.Feed) {
@@ -96,10 +108,12 @@ func (m StableStopIdProcessors) Run(feed *gtfsparser.Feed) {
 		geoHash := geohash(float64(s.Lat), float64(s.Lon), m.Precision)
 		normalizedName := applyMultilingualReplacements(s.Name)
 
-		newId := "s::" + geoHash + ":" + normalizedName
+		nameHash := hashAndTrim(normalizedName, m.HashLength)
+
+		newId := "s::" + geoHash + ":" + nameHash
 		s.Id = newId
 
-		newMap[s.Id] = s
+		newMap[newId] = s
 
 		// update additional fields
 		for k := range feed.StopsAddFlds {
