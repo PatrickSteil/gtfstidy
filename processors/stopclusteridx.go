@@ -7,8 +7,9 @@
 package processors
 
 import (
-	"math"
 	"fmt"
+	"math"
+
 	gtfs "github.com/patrickbr/gtfsparser/gtfs"
 )
 
@@ -108,7 +109,7 @@ func NewStopClusterIdx(clusters []*StopCluster, cellWidth, cellHeight float64) *
 			idx.Add(float64(s.Lat), float64(s.Lon), cid)
 		}
 		for _, s := range cluster.Childs {
-			lat, lon := getStopLatLon(s);
+			lat, lon := getStopLatLon(s)
 			idx.Add(float64(lat), float64(lon), cid)
 		}
 	}
@@ -171,23 +172,25 @@ func (gi *StopClusterIdx) GetNeighborsByLatLon(lat float64, lon float64, d float
 
 	lx, ly := latLngToWebMerc(float32(lat), float32(lon))
 
-	swX := max(0, gi.getCellXFromX(lx)-xPerm)
-	swY := max(0, gi.getCellYFromY(ly)-yPerm)
+	cellX := gi.getCellXFromX(lx)
+	cellY := gi.getCellYFromY(ly)
 
-	neX := min(gi.xWidth-1, gi.getCellXFromX(lx)+xPerm)
-	neY := min(gi.yHeight-1, gi.getCellYFromY(ly)+yPerm)
-
-	if xPerm > swX {
+	// clamp the lower bound to 0 without unsigned underflow, and the
+	// upper bound to the last valid grid index
+	var swX, swY uint
+	if xPerm > cellX {
 		swX = 0
 	} else {
-		swX = swX - xPerm
+		swX = cellX - xPerm
 	}
-
-	if yPerm > swY {
+	if yPerm > cellY {
 		swY = 0
 	} else {
-		swY = swY - yPerm
+		swY = cellY - yPerm
 	}
+
+	neX := min(gi.xWidth-1, cellX+xPerm)
+	neY := min(gi.yHeight-1, cellY+yPerm)
 
 	for x := swX; x <= neX && x < uint(len(gi.grid)); x++ {
 		for y := swY; y <= neY && y < uint(len(gi.grid[x])); y++ {

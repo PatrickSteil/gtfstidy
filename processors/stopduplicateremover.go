@@ -13,9 +13,9 @@ import (
 	gtfs "github.com/patrickbr/gtfsparser/gtfs"
 	"hash/fnv"
 	"os"
-	"unsafe"
 	"regexp"
 	"strings"
+	"unsafe"
 )
 
 // StopDuplicateRemover merges semantically equivalent stops
@@ -405,31 +405,31 @@ func (sdr StopDuplicateRemover) stopEquals(a *gtfs.Stop, b *gtfs.Stop, feed *gtf
 	if sdr.Fuzzy {
 		distApprox := distSApprox(a, b)
 		return ((distApprox <= sdr.DistThresholdStop/2 && parentsEqual) || a.Code == b.Code || len(a.Code) == 0 || len(b.Code) == 0) &&
-		((distApprox <= sdr.DistThresholdStop/2 && parentsEqual) || a.Name == b.Name) &&
+			((distApprox <= sdr.DistThresholdStop/2 && parentsEqual) || a.Name == b.Name) &&
+			a.Desc == b.Desc &&
+			a.Zone_id == b.Zone_id &&
+			(a.Url == b.Url || a.Url == nil || b.Url == nil) &&
+			a.Location_type == b.Location_type &&
+			a.Parent_station == b.Parent_station &&
+			a.Timezone.Equals(b.Timezone) &&
+			a.Wheelchair_boarding == b.Wheelchair_boarding &&
+			(a.Level == b.Level || a.Level == nil || b.Level == nil) &&
+			(!sdr.KeepIFOPT || sdr.ifoptEquals(a.Id, b.Id)) &&
+			a.Platform_code == b.Platform_code &&
+			(distApprox <= sdr.DistThresholdStop || (a.Location_type == 1 && distApprox <= sdr.DistThresholdStation))
+	}
+
+	return addFldsEq && a.Code == b.Code &&
+		a.Name == b.Name &&
 		a.Desc == b.Desc &&
 		a.Zone_id == b.Zone_id &&
-		(a.Url == b.Url || a.Url == nil || b.Url == nil) &&
+		a.Url == b.Url &&
 		a.Location_type == b.Location_type &&
 		a.Parent_station == b.Parent_station &&
 		a.Timezone.Equals(b.Timezone) &&
 		a.Wheelchair_boarding == b.Wheelchair_boarding &&
-		(a.Level == b.Level || a.Level == nil || b.Level == nil) &&
+		a.Level == b.Level &&
 		(!sdr.KeepIFOPT || sdr.ifoptEquals(a.Id, b.Id)) &&
 		a.Platform_code == b.Platform_code &&
-		(distApprox <= sdr.DistThresholdStop || (a.Location_type == 1 && distApprox <= sdr.DistThresholdStation))
-	}
-
-	return addFldsEq && a.Code == b.Code &&
-	a.Name == b.Name &&
-	a.Desc == b.Desc &&
-	a.Zone_id == b.Zone_id &&
-	a.Url == b.Url &&
-	a.Location_type == b.Location_type &&
-	a.Parent_station == b.Parent_station &&
-	a.Timezone.Equals(b.Timezone) &&
-	a.Wheelchair_boarding == b.Wheelchair_boarding &&
-	a.Level == b.Level &&
-	(!sdr.KeepIFOPT || sdr.ifoptEquals(a.Id, b.Id)) &&
-	a.Platform_code == b.Platform_code &&
-	(distSApprox(a, b) <= sdr.DistThresholdStop || (a.Location_type == 1 && distSApprox(a, b) <= sdr.DistThresholdStation))
+		(distSApprox(a, b) <= sdr.DistThresholdStop || (a.Location_type == 1 && distSApprox(a, b) <= sdr.DistThresholdStation))
 }
