@@ -173,6 +173,9 @@ func main() {
 	explicitCals := flag.BoolP("explicit-calendar", "", false, "add calendar.txt entry for every service, even irregular ones")
 	ensureTripHeadsigns := flag.BoolP("ensure-trip-headsigns", "", false, "write trip headsigns if missing")
 	ensureParents := flag.BoolP("ensure-stop-parents", "", false, "ensure that every stop (location_type=0) has a parent station")
+	ensureStableParents := flag.BoolP("ensure-stop-parents-stable", "", false, "ensure that every stop (location_type=0) has a parent station whose ID is a stable, content-derived ID (name + approx. location); stops with the same stable ID share a parent station")
+	stableParentsDataSource := flag.StringP("stable-parents-datasource", "", "", "optional short data-source tag prepended to stable parent station IDs (e.g. \"de-hvv\")")
+
 	keepColOrder := flag.BoolP("keep-col-order", "", false, "keep the original column ordering of the input feed")
 	keepFields := flag.BoolP("keep-additional-fields", "F", false, "keep all non-GTFS fields from the input")
 	dropTooFast := flag.BoolP("drop-too-fast-trips", "", false, "drop trips that are too fast to realistically occur")
@@ -344,14 +347,14 @@ func main() {
 			json, err := ioutil.ReadFile(polyFile)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nCould not parse polygon filter file: ")
-				fmt.Fprintf(os.Stderr, err.Error()+".\n")
+				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 				os.Exit(1)
 			}
 			fc1, err := geojson.UnmarshalFeatureCollection(json)
 
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nCould not parse polygon filter file: ")
-				fmt.Fprintf(os.Stderr, err.Error()+".\n")
+				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 				os.Exit(1)
 			}
 
@@ -369,7 +372,7 @@ func main() {
 			bytes, err := ioutil.ReadFile(polyFile)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nCould not parse polygon filter file: ")
-				fmt.Fprintf(os.Stderr, err.Error()+".\n")
+				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 				os.Exit(1)
 			}
 
@@ -386,7 +389,7 @@ func main() {
 
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nCould not parse polygon filter: ")
-				fmt.Fprintf(os.Stderr, err.Error()+".\n")
+				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 				os.Exit(1)
 			}
 		}
@@ -409,7 +412,7 @@ func main() {
 
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nCould not parse bounding box filter: ")
-				fmt.Fprintf(os.Stderr, err.Error()+".\n")
+				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 				os.Exit(1)
 			}
 		}
@@ -689,14 +692,26 @@ func main() {
 			minzers = append(minzers, processors.ServiceCalDatesRem{})
 		}
 
+		// --ensure-stop-parents-stable implies --ensure-stop-parents: any stop
+		// missing a parent gets one created first, so the stable-ID pass below
+		// can re-key every parent station - pre-existing ones and newly created
+		// ones alike - with the same content-derived ID scheme.
+		if *ensureStableParents {
+			*ensureParents = true
+		}
+
 		if *ensureParents {
 			minzers = append(minzers, processors.StopParentEnforcer{})
 		}
 
+		if *ensureStableParents {
+			minzers = append(minzers, processors.StableStopParentEnforcer{DataSource: *stableParentsDataSource})
+		}
+
 		if *useIDMinimizerNum {
-			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
+			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 10, KeepStations: *keepStationIds || *ensureStableParents, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		} else if *useIDMinimizerChar {
-			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
+			minzers = append(minzers, processors.IDMinimizer{Prefix: *idPrefix, Base: 36, KeepStations: *keepStationIds || *ensureStableParents, KeepBlocks: *keepBlockIds, KeepFares: *keepFareIds, KeepShapes: *keepShapeIds, KeepRoutes: *keepRouteIds, KeepTrips: *keepTripIds, KeepLevels: *keepLevelIds, KeepServices: *keepServiceIds, KeepAgencies: *keepAgencyIds, KeepPathways: *keepPathwayIds, KeepAttributions: *keepAttributionIds})
 		}
 
 		// do processing
