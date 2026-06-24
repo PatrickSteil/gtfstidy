@@ -130,7 +130,7 @@ func (rdr RouteDuplicateRemover) getEquivalentRoutes(route *gtfs.Route, feed *gt
 					changed = true
 
 					// update the stops for route, important for transitivity
-					for s, _ := range stops[r] {
+					for s := range stops[r] {
 						stops[route][s] = true
 					}
 				}
@@ -292,7 +292,7 @@ func (rdr RouteDuplicateRemover) getRouteChunks(feed *gtfsparser.Feed) map[uint3
 }
 
 func (rdr RouteDuplicateRemover) routesShareStops(a *gtfs.Route, b *gtfs.Route, stops map[*gtfs.Route]map[*gtfs.Stop]bool) bool {
-	for s, _ := range stops[a] {
+	for s := range stops[a] {
 		if _, ok := stops[b][s]; ok {
 			return true
 		}

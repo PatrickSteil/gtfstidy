@@ -7,9 +7,9 @@
 package processors
 
 import (
-	"math"
 	"fmt"
 	gtfs "github.com/patrickbr/gtfsparser/gtfs"
+	"math"
 )
 
 // StopClusterIdx stores objects for fast nearest-neighbor
@@ -108,7 +108,7 @@ func NewStopClusterIdx(clusters []*StopCluster, cellWidth, cellHeight float64) *
 			idx.Add(float64(s.Lat), float64(s.Lon), cid)
 		}
 		for _, s := range cluster.Childs {
-			lat, lon := getStopLatLon(s);
+			lat, lon := getStopLatLon(s)
 			idx.Add(float64(lat), float64(lon), cid)
 		}
 	}

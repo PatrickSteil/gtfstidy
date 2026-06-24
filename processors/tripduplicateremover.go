@@ -850,7 +850,6 @@ func (m *TripDuplicateRemover) combineAllOverlapTrips(feed *gtfsparser.Feed) boo
 							continue
 						}
 
-
 						if m.tripAttrEq(ta, tb, feed) && m.tripStEq(ta, tb) {
 							overlaps := m.tripCalOverlap(tb, ta)
 							if len(overlaps) > 0 {

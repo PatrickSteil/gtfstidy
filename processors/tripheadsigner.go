@@ -33,15 +33,15 @@ func (sdr TripHeadsigner) Run(feed *gtfsparser.Feed) {
 			}
 
 			// next, check if the last station has a parent station with a non-empty name
-			if t.StopTimes[len(t.StopTimes) - 1].Stop().Parent_station != nil && len(t.StopTimes[len(t.StopTimes) - 1].Stop().Parent_station.Name) != 0 {
+			if t.StopTimes[len(t.StopTimes)-1].Stop().Parent_station != nil && len(t.StopTimes[len(t.StopTimes)-1].Stop().Parent_station.Name) != 0 {
 
-				t.Headsign = &t.StopTimes[len(t.StopTimes) - 1].Stop().Parent_station.Name
+				t.Headsign = &t.StopTimes[len(t.StopTimes)-1].Stop().Parent_station.Name
 				continue
 			}
 
 			// as a fallback, use the name of the last stop, if non-empty
-			if len(t.StopTimes[len(t.StopTimes) - 1].Stop().Name) != 0 {
-				t.Headsign = &t.StopTimes[len(t.StopTimes) - 1].Stop().Name
+			if len(t.StopTimes[len(t.StopTimes)-1].Stop().Name) != 0 {
+				t.Headsign = &t.StopTimes[len(t.StopTimes)-1].Stop().Name
 				continue
 			}
 		}

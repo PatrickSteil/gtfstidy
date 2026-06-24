@@ -55,11 +55,11 @@ func TestNormalizeStopName_NoWhitespace(t *testing.T) {
 
 func TestNormalizeStopName_Transliteration(t *testing.T) {
 	cases := map[string]string{
-		"Hauptbahnhof Süd":  "hauptbahnhof-sud",
-		"Münchner Freiheit": "munchner-freiheit",
+		"Hauptbahnhof Süd":  "hauptbahnhof~sud",
+		"Münchner Freiheit": "munchner~freiheit",
 		"Straße":            "strasse",
 		"Düsseldorf":        "dusseldorf",
-		"Köln Hbf":          "koln-hbf",
+		"Köln Hbf":          "koln~hbf",
 	}
 	for in, want := range cases {
 		got := normalizeStopName(in)
@@ -69,14 +69,14 @@ func TestNormalizeStopName_Transliteration(t *testing.T) {
 	}
 }
 
-func TestNormalizeStopName_NoLeadingTrailingHyphen(t *testing.T) {
+func TestNormalizeStopName_NoLeadingTrailingTilde(t *testing.T) {
 	got := normalizeStopName("!!!Hauptbahnhof!!!")
-	if strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
-		t.Errorf("normalizeStopName produced leading/trailing hyphen: %q", got)
+	if strings.HasPrefix(got, "~") || strings.HasSuffix(got, "~") {
+		t.Errorf("normalizeStopName produced leading/trailing tilde: %q", got)
 	}
 }
 
-// --- fix #2: empty / degenerate names ---------------------------------------
+// --- empty / degenerate names -----------------------------------------------
 
 func TestNormalizeStopName_EmptyName(t *testing.T) {
 	for _, name := range []string{"", "   ", "!!!", "---", "..."} {
@@ -89,15 +89,19 @@ func TestNormalizeStopName_EmptyName(t *testing.T) {
 
 func TestStableStopID_EmptyNameProducesUsableID(t *testing.T) {
 	id := stableStopID("", "", 52.5, 13.4)
+	if !strings.HasPrefix(id, "s-") {
+		t.Errorf("stableStopID with empty name = %q, expected prefix 's-'", id)
+	}
 	if !strings.Contains(id, unnamedStopPlaceholder) {
 		t.Errorf("stableStopID with empty name = %q, expected to contain %q", id, unnamedStopPlaceholder)
 	}
-	if strings.Contains(id, "::") {
-		t.Errorf("stableStopID with empty name = %q, contains empty field '::'", id)
+	// Must not contain an empty segment (e.g. "s--name" or "s-geohash-")
+	if strings.Contains(id, "--") || strings.HasSuffix(id, "-") {
+		t.Errorf("stableStopID with empty name = %q, contains empty segment", id)
 	}
 }
 
-// --- fix #3: ß handling without dead code ------------------------------------
+// --- ß handling -------------------------------------------------------------
 
 func TestTransliterateToASCII_SharpS(t *testing.T) {
 	got := transliterateToASCII("Straße")
@@ -107,45 +111,91 @@ func TestTransliterateToASCII_SharpS(t *testing.T) {
 }
 
 func TestTransliterateToASCII_NoUnrelatedSSCorruption(t *testing.T) {
-	// Literal uppercase "SS" in the input (unrelated to ß) should pass through
-	// unchanged by transliterateToASCII; only ß is special-cased.
 	got := transliterateToASCII("SS Mannschaft")
 	if got != "SS Mannschaft" {
 		t.Errorf("transliterateToASCII(%q) = %q, want unchanged %q", "SS Mannschaft", got, "SS Mannschaft")
 	}
 }
 
-// --- fix #4: degraded fallback precision / format ---------------------------
+// --- Onestop ID format ------------------------------------------------------
 
-func TestStableStopID_DegradedFallback_NaNCoords(t *testing.T) {
-	// Call fallbackStableID directly — this is what it's exported for in tests.
-	id := fallbackStableID("", "Some Stop", 52.1234567, 13.1234567)
-	parts := strings.Split(id, ":")
-	if len(parts) < 4 {
-		t.Fatalf("expected fallback ID with at least 4 colon-separated fields, got %q", id)
+func TestStableStopID_Format(t *testing.T) {
+	id := stableStopID("", "Hauptbahnhof Süd", 52.5, 13.4)
+	// Must be "s-<geohash>-<name>"
+	if !strings.HasPrefix(id, "s-") {
+		t.Errorf("stableStopID = %q, want prefix 's-'", id)
 	}
-	latStr := parts[len(parts)-2]
-	lonStr := parts[len(parts)-1]
-	for _, numStr := range []string{latStr, lonStr} {
-		dotIdx := strings.Index(numStr, ".")
-		if dotIdx == -1 {
-			t.Errorf("fallback coordinate %q has no decimal point", numStr)
-			continue
-		}
-		decimals := len(numStr) - dotIdx - 1
-		if decimals != 4 {
-			t.Errorf("fallback coordinate %q has %d decimal places, want 4", numStr, decimals)
-		}
+	parts := strings.SplitN(id, "-", 3)
+	if len(parts) != 3 {
+		t.Fatalf("stableStopID = %q, want 3 dash-separated components, got %d", id, len(parts))
+	}
+	if parts[0] != "s" {
+		t.Errorf("entity type = %q, want 's'", parts[0])
+	}
+	if len(parts[1]) == 0 {
+		t.Errorf("geohash component is empty in %q", id)
+	}
+	if len(parts[2]) == 0 {
+		t.Errorf("name component is empty in %q", id)
 	}
 }
 
-func TestStableStopID_DegradedFallback_WithDataSource(t *testing.T) {
+func TestStableStopID_WithDataSource(t *testing.T) {
+	id := stableStopID("de-hvv", "Hauptbahnhof", 52.5, 13.4)
+	// Name component should be "de-hvv~hauptbahnhof"
+	if !strings.HasSuffix(id, "-de-hvv~hauptbahnhof") {
+		t.Errorf("stableStopID with dataSource = %q, want suffix '-de-hvv~hauptbahnhof'", id)
+	}
+}
+
+func TestStableStopID_NameUsesTildes(t *testing.T) {
+	id := stableStopID("", "Hauptbahnhof Süd", 52.5, 13.4)
+	// Extract name component (everything after second "-")
+	idx := strings.Index(id[2:], "-") // skip "s-"
+	if idx == -1 {
+		t.Fatalf("no name component in %q", id)
+	}
+	namePart := id[2+idx+1:]
+	if strings.Contains(namePart, " ") {
+		t.Errorf("name component %q contains spaces", namePart)
+	}
+	// Word break should be "~", not "-"
+	if !strings.Contains(namePart, "~") {
+		t.Errorf("name component %q does not use '~' as word separator", namePart)
+	}
+}
+
+// --- fallback (invalid coordinates) ----------------------------------------
+
+func TestStableStopID_FallbackOnNaN(t *testing.T) {
 	nan := float32(math.NaN())
-	id := stableStopID("de-hvv", "Some Stop", nan, nan)
-	if !strings.HasPrefix(id, "1:de-hvv:some-stop:") {
-		t.Errorf("stableStopID with dataSource = %q, want prefix %q", id, "1:de-hvv:some-stop:")
+	id := stableStopID("", "Some Stop", nan, nan)
+	// Two-component fallback: "s-<name>" (no geohash segment)
+	if !strings.HasPrefix(id, "s-") {
+		t.Errorf("fallback ID = %q, want prefix 's-'", id)
+	}
+	// Should be exactly two dash-separated parts: "s" and the name
+	parts := strings.SplitN(id, "-", 3)
+	if len(parts) != 2 {
+		t.Errorf("fallback ID = %q, want exactly 2 dash-separated components (no geohash), got %d", id, len(parts))
 	}
 }
+
+func TestFallbackStableID_WithDataSource(t *testing.T) {
+	id := fallbackStableID("de-hvv", "some~stop", 0, 0)
+	if id != "s-de-hvv~some~stop" {
+		t.Errorf("fallbackStableID = %q, want %q", id, "s-de-hvv~some~stop")
+	}
+}
+
+func TestFallbackStableID_WithoutDataSource(t *testing.T) {
+	id := fallbackStableID("", "some~stop", 0, 0)
+	if id != "s-some~stop" {
+		t.Errorf("fallbackStableID = %q, want %q", id, "s-some~stop")
+	}
+}
+
+// --- truncateToDP (still used by tests, kept in production for clarity) -----
 
 func TestTruncateToDP(t *testing.T) {
 	cases := []struct {
@@ -166,39 +216,40 @@ func TestTruncateToDP(t *testing.T) {
 	}
 }
 
-// --- fix #5: safeParentID bounded loop --------------------------------------
+// --- safeParentID -----------------------------------------------------------
 
 func TestSafeParentID_ReturnsStableKeyWhenFree(t *testing.T) {
 	feed := newFeed()
-	got := safeParentID(feed, "1:test:abc")
-	if got != "1:test:abc" {
-		t.Errorf("safeParentID = %q, want %q", got, "1:test:abc")
+	got := safeParentID(feed, "s-u33dc1d-hauptbahnhof")
+	if got != "s-u33dc1d-hauptbahnhof" {
+		t.Errorf("safeParentID = %q, want %q", got, "s-u33dc1d-hauptbahnhof")
 	}
 }
 
 func TestSafeParentID_ReturnsStableKeyWhenOccupiedByStation(t *testing.T) {
 	feed := newFeed()
-	addStop(feed, "1:test:abc", "Existing Station", 0, 0, 1) // location_type=1
-	got := safeParentID(feed, "1:test:abc")
-	if got != "1:test:abc" {
-		t.Errorf("safeParentID = %q, want %q (stations are reusable parents)", got, "1:test:abc")
+	addStop(feed, "s-u33dc1d-hauptbahnhof", "Existing Station", 0, 0, 1)
+	got := safeParentID(feed, "s-u33dc1d-hauptbahnhof")
+	if got != "s-u33dc1d-hauptbahnhof" {
+		t.Errorf("safeParentID = %q, want %q (stations are reusable parents)", got, "s-u33dc1d-hauptbahnhof")
 	}
 }
 
 func TestSafeParentID_AppendsSuffixWhenOccupiedByNonStation(t *testing.T) {
 	feed := newFeed()
-	addStop(feed, "1:test:abc", "A Regular Stop", 0, 0, 0) // location_type=0
-	got := safeParentID(feed, "1:test:abc")
-	if got != "1:test:abc:1" {
-		t.Errorf("safeParentID = %q, want %q", got, "1:test:abc:1")
+	addStop(feed, "s-u33dc1d-hauptbahnhof", "A Regular Stop", 0, 0, 0)
+	got := safeParentID(feed, "s-u33dc1d-hauptbahnhof")
+	if got != "s-u33dc1d-hauptbahnhof~1" {
+		t.Errorf("safeParentID = %q, want %q", got, "s-u33dc1d-hauptbahnhof~1")
 	}
 }
 
 func TestSafeParentID_PanicsWhenExhausted(t *testing.T) {
 	feed := newFeed()
-	addStop(feed, "1:test:abc", "Stop", 0, 0, 0)
+	key := "s-u33dc1d-hauptbahnhof"
+	addStop(feed, key, "Stop", 0, 0, 0)
 	for i := 1; i <= maxParentIDAttempts; i++ {
-		addStop(feed, "1:test:abc:"+itoa(i), "Stop", 0, 0, 0)
+		addStop(feed, key+"~"+itoa(i), "Stop", 0, 0, 0)
 	}
 
 	defer func() {
@@ -206,7 +257,7 @@ func TestSafeParentID_PanicsWhenExhausted(t *testing.T) {
 			t.Errorf("expected safeParentID to panic after exhausting %d attempts, it did not", maxParentIDAttempts)
 		}
 	}()
-	safeParentID(feed, "1:test:abc")
+	safeParentID(feed, key)
 }
 
 // itoa avoids importing strconv twice in the test file for this one helper use.
@@ -232,14 +283,14 @@ func itoa(i int) string {
 	return string(buf[pos:])
 }
 
-// --- determinism -------------------------------------------------------------
+// --- determinism ------------------------------------------------------------
 
 func TestRun_DeterministicAcrossRuns(t *testing.T) {
 	buildFeed := func() *gtfsparser.Feed {
 		feed := newFeed()
 		addStop(feed, "a", "Central Station", 52.5251, 13.3694, 0)
 		addStop(feed, "b", "Central Station", 52.5251, 13.3694, 0)
-		addStop(feed, "c", "Central Station", 52.5251, 13.3695, 0) // near-duplicate name/coords
+		addStop(feed, "c", "Central Station", 52.5251, 13.3695, 0)
 		addStop(feed, "d", "Other Stop", 48.1351, 11.5820, 0)
 		return feed
 	}
@@ -274,7 +325,7 @@ func TestRun_DeterministicAcrossRuns(t *testing.T) {
 	}
 }
 
-// --- end-to-end smoke test ---------------------------------------------------
+// --- end-to-end smoke tests -------------------------------------------------
 
 func TestRun_CreatesParentForParentlessStop(t *testing.T) {
 	feed := newFeed()
@@ -288,6 +339,9 @@ func TestRun_CreatesParentForParentlessStop(t *testing.T) {
 	}
 	if child.Parent_station.Location_type != 1 {
 		t.Errorf("parent station has Location_type = %d, want 1", child.Parent_station.Location_type)
+	}
+	if !strings.HasPrefix(child.Parent_station.Id, "s-") {
+		t.Errorf("generated parent ID does not start with 's-': %q", child.Parent_station.Id)
 	}
 	if strings.ContainsAny(child.Parent_station.Id, " \t\n") {
 		t.Errorf("generated parent ID contains whitespace: %q", child.Parent_station.Id)
@@ -321,5 +375,22 @@ func TestRun_PreservesExistingParent(t *testing.T) {
 
 	if feed.Stops["platform-1"].Parent_station != parent {
 		t.Error("expected existing parent assignment to be preserved")
+	}
+}
+
+func TestRun_GeneratedIDMatchesOnestopScheme(t *testing.T) {
+	feed := newFeed()
+	addStop(feed, "platform-1", "Hauptbahnhof", 52.5, 13.4, 0)
+
+	StableStopParentEnforcer{}.Run(feed)
+
+	id := feed.Stops["platform-1"].Parent_station.Id
+	parts := strings.SplitN(id, "-", 3)
+	if len(parts) != 3 || parts[0] != "s" {
+		t.Errorf("generated ID %q does not follow Onestop scheme 's-<geohash>-<name>'", id)
+	}
+	// Geohash component should be exactly geohashPrecision characters
+	if len(parts[1]) != geohashPrecision {
+		t.Errorf("geohash in %q has length %d, want %d", id, len(parts[1]), geohashPrecision)
 	}
 }

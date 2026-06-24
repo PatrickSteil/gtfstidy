@@ -15,59 +15,61 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mmcloughlin/geohash"
 	"github.com/patrickbr/gtfsparser"
 	gtfs "github.com/patrickbr/gtfsparser/gtfs"
-	"github.com/uber/h3-go/v4"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
 )
 
 // StableStopParentEnforcer ensures that every stop (location_type=0) without an
 // existing parent gets a parent station whose stop_id is a stable, content-
-// derived ID based on the stop's normalised name and approximate location:
+// derived Onestop ID based on the stop's normalised name and approximate location:
 //
-//	"1:<normalizedName>:<h3cell>"
+//	"s-<geohash>-<normalizedName>"
 //
-// When a DataSource tag is set the format is:
+// When a DataSource tag is set the name component is prefixed with it:
 //
-//	"1:<dataSource>:<normalizedName>:<h3cell>"
+//	"s-<geohash>-<dataSource>~<normalizedName>"
 //
-// If the stop's coordinates cannot be resolved to an H3 cell (e.g. invalid
-// lat/lng), a lower-precision degraded fallback is used instead:
+// This follows the Transitland Onestop ID scheme
+// (https://www.transit.land/documentation/concepts/onestop-id-scheme/).
+// The entity type prefix is "s" (stop/station). The geohash encodes the
+// stop's location at precision 7 (~150m × 150m). Word breaks within the
+// name component use "~" as required by the spec.
 //
-//	"1:<dataSource>:<normalizedName>:<lat4dp>:<lon4dp>"
+// If the stop's coordinates are invalid (NaN/Inf), a two-component fallback
+// is used without a geohash:
 //
-// This follows the stable-public-transport-ids convention
-// (https://github.com/derhuerst/stable-public-transport-ids).
+//	"s-<dataSource>~<normalizedName>"
 //
 // Stops that share the same stable ID are grouped under one parent station,
 // so semantically equivalent stops across the feed automatically converge to
-// the same parent.  Already existing parent relations are preserved.
+// the same parent. Already existing parent relations are preserved.
 type StableStopParentEnforcer struct {
-	// DataSource is an optional short tag prepended to every generated ID to
-	// scope it to a specific data provider (e.g. "de-hvv").
+	// DataSource is an optional short tag prepended to the name component of
+	// every generated ID to scope it to a specific data provider (e.g. "de-hvv").
 	// When empty the prefix is omitted.
 	DataSource string
 }
 
 // unnamedStopPlaceholder is substituted for the name segment of a stable ID
-// when a stop has no usable name (empty, or only punctuation/whitespace),
-// so the resulting ID stays self-explanatory instead of containing an empty
-// field (e.g. "1::8a1fb46622dffff").
+// when a stop has no usable name (empty, or only punctuation/whitespace).
 const unnamedStopPlaceholder = "unnamed"
 
-// maxParentIDAttempts bounds the linear-probing loop in safeParentID. GTFS
-// feeds are finite, so collisions exhaust quickly in practice; this cap just
-// turns a hypothetical infinite loop into a clear failure instead of a hang.
+// geohashPrecision is the number of geohash characters used in stable IDs.
+// Precision 7 gives a ~150m × 150m bounding box — fine enough to distinguish
+// nearby stops while coarse enough to be stable under minor coordinate drift.
+const geohashPrecision = 7
+
+// maxParentIDAttempts bounds the linear-probing loop in safeParentID.
 const maxParentIDAttempts = 10000
 
 var nonAlphaNumRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // transliterateToASCII decomposes Unicode via NFD and drops combining marks,
 // mapping e.g. ä→a, ö→o, ü→u. ß has no NFD form that yields "ss", so it is
-// handled explicitly beforehand. (Uppercase ẞ is folded to lowercase by the
-// caller before this function is reached, so only lowercase "ß" needs to be
-// special-cased here.)
+// handled explicitly beforehand.
 func transliterateToASCII(s string) string {
 	s = strings.ReplaceAll(s, "ß", "ss")
 	result, _, _ := transform.String(
@@ -79,19 +81,17 @@ func transliterateToASCII(s string) string {
 	return result
 }
 
-// normalizeStopName returns a lower-cased, hyphenated, ASCII-only version of
-// name: Unicode characters are first transliterated to their ASCII base
-// letters (ä→a, ö→o, ü→u, ß→ss), then any run of non-alphanumeric characters
-// is collapsed to a single "-", and leading/trailing hyphens are trimmed.
+// normalizeStopName returns a lower-cased, tilde-separated, ASCII-only version
+// of name suitable for use as the name component of a Onestop ID. Unicode
+// characters are transliterated to their ASCII base letters, then any run of
+// non-alphanumeric characters is collapsed to a single "~" (the Onestop ID
+// word-break separator), and leading/trailing tildes are trimmed.
 //
-// Using "-" instead of a space avoids producing whitespace inside the
-// colon-delimited stable ID. If the result is empty (the name was empty or
-// contained no alphanumeric characters at all), unnamedStopPlaceholder is
-// returned instead, so the ID never has an empty field.
+// If the result is empty, unnamedStopPlaceholder is returned.
 func normalizeStopName(name string) string {
 	normalized := strings.Trim(
-		nonAlphaNumRe.ReplaceAllString(strings.ToLower(transliterateToASCII(name)), "-"),
-		"-",
+		nonAlphaNumRe.ReplaceAllString(strings.ToLower(transliterateToASCII(name)), "~"),
+		"~",
 	)
 	if normalized == "" {
 		return unnamedStopPlaceholder
@@ -99,84 +99,50 @@ func normalizeStopName(name string) string {
 	return normalized
 }
 
-func stableStopID(dataSource, name string, lat, lon float32) string {
-	normalized := normalizeStopName(name)
-
-	// Guard against NaN/Inf coordinates — h3.LatLngToCell does not return an
-	// error for these; it silently produces a nonsense cell or formats "NaN".
-	if math.IsNaN(float64(lat)) || math.IsNaN(float64(lon)) ||
-		math.IsInf(float64(lat), 0) || math.IsInf(float64(lon), 0) {
-		return fallbackStableID(dataSource, normalized, lat, lon)
-	}
-
-	cell, err := h3.LatLngToCell(
-		h3.LatLng{
-			Lat: float64(lat),
-			Lng: float64(lon),
-		},
-		9,
-	)
-
-	if err != nil {
-		return fallbackStableID(dataSource, normalized, lat, lon)
-	}
-
+// nameComponent builds the full name segment of the Onestop ID, optionally
+// prefixed with dataSource separated by "~".
+func nameComponent(dataSource, normalizedName string) string {
 	if dataSource != "" {
-		return fmt.Sprintf(
-			"1:%s:%s:%s",
-			dataSource,
-			normalized,
-			h3.Cell(cell).String(),
-		)
+		return dataSource + "~" + normalizedName
 	}
-
-	return fmt.Sprintf(
-		"1:%s:%s",
-		normalized,
-		h3.Cell(cell).String(),
-	)
+	return normalizedName
 }
 
-// fallbackStableID builds the degraded, lower-precision stable ID used when
-// the stop's coordinates cannot be resolved to an H3 cell (e.g. invalid
-// lat/lng). It uses 4 decimal places (~11m precision at the equator) rather
-// than 2dp (~1km) to keep nearby-but-distinct stops from silently colliding
-// in this rare path. Split out from stableStopID so it can be exercised
-// directly in tests without depending on h3's internal error conditions.
-func fallbackStableID(dataSource, normalized string, lat, lon float32) string {
-	var latStr, lonStr string
-	if math.IsNaN(float64(lat)) || math.IsInf(float64(lat), 0) {
-		latStr = fmt.Sprintf("%.4f", 0.0) // or use a sentinel like "0.0000"
-	} else {
-		latStr = strconv.FormatFloat(truncateToDP(float64(lat), 4), 'f', 4, 64)
+// stableStopID returns a Onestop ID for a stop with the given attributes.
+func stableStopID(dataSource, name string, lat, lon float32) string {
+	normalized := normalizeStopName(name)
+	namePart := nameComponent(dataSource, normalized)
+
+	if math.IsNaN(float64(lat)) || math.IsNaN(float64(lon)) ||
+		math.IsInf(float64(lat), 0) || math.IsInf(float64(lon), 0) {
+		// Two-component fallback: no geohash.
+		return "s-" + namePart
 	}
-	if math.IsNaN(float64(lon)) || math.IsInf(float64(lon), 0) {
-		lonStr = fmt.Sprintf("%.4f", 0.0)
-	} else {
-		lonStr = strconv.FormatFloat(truncateToDP(float64(lon), 4), 'f', 4, 64)
-	}
-	if dataSource != "" {
-		return "1:" + dataSource + ":" + normalized + ":" + latStr + ":" + lonStr
-	}
-	return "1:" + normalized + ":" + latStr + ":" + lonStr
+
+	gh := geohash.EncodeWithPrecision(float64(lat), float64(lon), geohashPrecision)
+	return "s-" + gh + "-" + namePart
+}
+
+// fallbackStableID is retained for direct use in tests that need to exercise
+// the degraded path without depending on specific coordinate values.
+func fallbackStableID(dataSource, normalized string, _, _ float32) string {
+	return "s-" + nameComponent(dataSource, normalized)
 }
 
 // truncateToDP truncates v toward zero to dp decimal places.
+// Kept for use by tests; no longer used in ID generation.
 func truncateToDP(v float64, dp int) float64 {
 	scale := math.Pow10(dp)
 	return math.Trunc(v*scale) / scale
 }
 
 // safeParentID returns a feed-unique stop_id for stableKey.
-// If stableKey is already taken by a non-station stop it appends ":1", ":2" …
-// up to maxParentIDAttempts, after which it panics rather than looping
-// forever — this should be unreachable for any real-world GTFS feed.
 func safeParentID(feed *gtfsparser.Feed, stableKey string) string {
 	if existing, ok := feed.Stops[stableKey]; !ok || existing.Location_type == 1 {
 		return stableKey
 	}
 	for i := 1; i <= maxParentIDAttempts; i++ {
-		candidate := stableKey + ":" + strconv.Itoa(i)
+		candidate := stableKey + "~" + strconv.Itoa(i)
 		if existing, ok := feed.Stops[candidate]; !ok || existing.Location_type == 1 {
 			return candidate
 		}
@@ -187,12 +153,7 @@ func safeParentID(feed *gtfsparser.Feed, stableKey string) string {
 	))
 }
 
-// sortedStopIDs returns the IDs of feed.Stops in deterministic (sorted)
-// order. Go map iteration order is randomized per-run, so iterating the map
-// directly would make the "winner" of stable-key collisions (and therefore
-// which stops get renamed/merged) non-deterministic across runs on identical
-// input — undesirable for a processor whose entire purpose is producing
-// *stable* IDs.
+// sortedStopIDs returns the IDs of feed.Stops in deterministic (sorted) order.
 func sortedStopIDs(feed *gtfsparser.Feed) []string {
 	ids := make([]string, 0, len(feed.Stops))
 	for id := range feed.Stops {
@@ -245,7 +206,7 @@ func (e StableStopParentEnforcer) Run(feed *gtfsparser.Feed) {
 		s.Parent_station = parent
 	}
 
-	// Build a reverse index once so the collision re-pointing below is O(children)
+	// Build a reverse index once so collision re-pointing is O(children)
 	// rather than O(all stops) per losing station.
 	childrenOf := make(map[*gtfs.Stop][]*gtfs.Stop)
 	for _, id := range sortedStopIDs(feed) {
@@ -256,15 +217,7 @@ func (e StableStopParentEnforcer) Run(feed *gtfsparser.Feed) {
 	}
 
 	// Second pass: give every existing parent station a stable ID if it does
-	// not already have one. We derive the stable key from the station's own
-	// name and position.
-	//
-	// Collision rule: if the stable key is already occupied by another station,
-	// that other station wins — the current one keeps its original ID (it is
-	// already stable enough to stay as-is, and its children remain attached).
-	// Iteration is over a fixed, sorted snapshot of stations taken up front
-	// (rather than the live map) since this loop mutates feed.Stops as it
-	// renames/deletes entries.
+	// not already have one.
 	stationSnapshot := make([]*gtfs.Stop, 0)
 	for _, id := range sortedStopIDs(feed) {
 		s := feed.Stops[id]
@@ -274,8 +227,6 @@ func (e StableStopParentEnforcer) Run(feed *gtfsparser.Feed) {
 	}
 
 	for _, s := range stationSnapshot {
-		// The station may have already been removed earlier in this loop
-		// (as the losing side of a prior collision) — skip if so.
 		if feed.Stops[s.Id] != s {
 			continue
 		}
@@ -288,9 +239,6 @@ func (e StableStopParentEnforcer) Run(feed *gtfsparser.Feed) {
 
 		winner, taken := feed.Stops[stableKey]
 		if taken && winner != s {
-			// Another station already owns that stable key — it wins.
-			// Re-point children using the reverse index — O(children of s),
-			// not O(all stops).
 			for _, child := range childrenOf[s] {
 				child.Parent_station = winner
 				childrenOf[winner] = append(childrenOf[winner], child)
@@ -300,8 +248,6 @@ func (e StableStopParentEnforcer) Run(feed *gtfsparser.Feed) {
 			continue
 		}
 
-		// The stable key is free (or points to s itself via a prior iteration):
-		// rename s to the stable ID.
 		delete(feed.Stops, s.Id)
 		s.Id = stableKey
 		feed.Stops[stableKey] = s
