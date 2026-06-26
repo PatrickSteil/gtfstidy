@@ -7,8 +7,9 @@
 package processors
 
 import (
-	gtfs "github.com/patrickbr/gtfsparser/gtfs"
 	"math"
+
+	gtfs "github.com/patrickbr/gtfsparser/gtfs"
 )
 
 // ShapeIdx stores objects for fast nearest-neighbor
@@ -81,7 +82,7 @@ func NewShapeIdx(shapes []*gtfs.Shape, mercs map[*gtfs.Shape][][]float64, cellWi
 func (gi *ShapeIdx) Add(origShp *gtfs.Shape, shp [][]float64) {
 	for i := 1; i < len(shp); i++ {
 		ax, ay := shp[i-1][0], shp[i-1][1]
-		bx, by := shp[i][0], shp[0][1]
+		bx, by := shp[i][0], shp[i][1]
 		llx := math.Min(ax, bx)
 		lly := math.Min(ay, by)
 		urx := math.Max(ax, bx)
