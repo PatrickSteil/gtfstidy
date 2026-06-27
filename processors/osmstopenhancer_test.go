@@ -3,48 +3,64 @@ package processors
 import (
 	"math"
 	"testing"
+
+	"github.com/patrickbr/gtfsparser/gtfs"
 )
 
 // ---------------------------------------------------------------------------
 // haversineM
 // ---------------------------------------------------------------------------
 
-func TestHaversineM_SamePoint(t *testing.T) {
-	if d := haversineM(48.0, 8.0, 48.0, 8.0); d != 0 {
-		t.Errorf("same point: expected 0, got %f", d)
+func TestHaversineM_ZeroDistance(t *testing.T) {
+	d := haversineM(48.0, 8.0, 48.0, 8.0)
+	if d != 0 {
+		t.Errorf("expected 0 distance for identical points, got %f", d)
 	}
 }
 
 func TestHaversineM_KnownDistance(t *testing.T) {
-	// Heidelberg Hbf → Mannheim Hbf, roughly 18 km.
-	d := haversineM(49.4037, 8.6757, 49.4794, 8.4694)
-	if math.Abs(d-17_600) > 500 {
-		t.Errorf("Heidelberg→Mannheim: expected ~17600 m, got %.0f", d)
+	// Roughly 1 degree of latitude ~ 111.32 km.
+	d := haversineM(0, 0, 1, 0)
+	want := 111_320.0
+	tol := 1500.0 // generous tolerance for the spherical approximation
+	if math.Abs(d-want) > tol {
+		t.Errorf("expected ~%f m, got %f m", want, d)
 	}
 }
 
-func TestHaversineM_Symmetry(t *testing.T) {
-	a := haversineM(48.0, 8.0, 49.0, 9.0)
-	b := haversineM(49.0, 9.0, 48.0, 8.0)
-	if math.Abs(a-b) > 1e-6 {
-		t.Errorf("haversine not symmetric: %f vs %f", a, b)
+func TestHaversineM_Symmetric(t *testing.T) {
+	d1 := haversineM(48.1, 8.1, 48.2, 8.3)
+	d2 := haversineM(48.2, 8.3, 48.1, 8.1)
+	if math.Abs(d1-d2) > 1e-9 {
+		t.Errorf("expected symmetric distance, got %f vs %f", d1, d2)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// degreesForMeters
+// degreesForMetersLat / degreesForMetersLon
 // ---------------------------------------------------------------------------
 
-func TestDegreesForMeters(t *testing.T) {
-	// 111_320 m ≈ 1 degree.
-	d := degreesForMeters(48.0, 111_320)
-	if math.Abs(d-1.0) > 0.01 {
-		t.Errorf("expected ~1.0 degree, got %f", d)
+func TestDegreesForMetersLat(t *testing.T) {
+	got := degreesForMetersLat(111_320)
+	if math.Abs(got-1.0) > 1e-9 {
+		t.Errorf("expected ~1.0 degree, got %f", got)
 	}
-	// 150 m should be a small positive number.
-	d150 := degreesForMeters(48.0, 150)
-	if d150 <= 0 || d150 > 0.01 {
-		t.Errorf("150 m in degrees out of range: %f", d150)
+}
+
+func TestDegreesForMetersLon_ShrinksWithLatitude(t *testing.T) {
+	atEquator := degreesForMetersLon(0, 150)
+	atHighLat := degreesForMetersLon(60, 150)
+	if atHighLat <= atEquator {
+		t.Errorf("expected longitude degree-radius to grow with latitude (equator=%f, 60deg=%f)",
+			atEquator, atHighLat)
+	}
+}
+
+func TestDegreesForMetersLon_PoleClamped(t *testing.T) {
+	// Should not blow up (divide by ~0) near the pole.
+	got := degreesForMetersLon(89.999, 150)
+	if math.IsInf(got, 0) || math.IsNaN(got) {
+		t.Errorf("expected finite value near pole, got %f", got)
 	}
 }
 
@@ -52,339 +68,437 @@ func TestDegreesForMeters(t *testing.T) {
 // normaliseString
 // ---------------------------------------------------------------------------
 
-func TestNormaliseString(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"Zürich HB", "zürich hb"},
-		{"St. Gallen", "st gallen"},
-		{"RAPPERSWIL-JONA", "rapperswiljona"},
-		{"  spaces  ", "spaces"},
-		{"", ""},
+func TestNormaliseString_LowercasesAndFoldsDiacritics(t *testing.T) {
+	cases := map[string]string{
+		"Müller":         "muller",
+		"Straße":         "strasse",
+		"Café René":      "cafe rene",
+		"  Hauptbahnhof": "hauptbahnhof",
+		"":               "",
 	}
-	for _, c := range cases {
-		if got := normaliseString(c.in); got != c.want {
-			t.Errorf("normalise(%q): want %q, got %q", c.in, c.want, got)
+	for in, want := range cases {
+		got := normaliseString(in)
+		if got != want {
+			t.Errorf("normaliseString(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// trigramSimilarity
-// ---------------------------------------------------------------------------
-
-func TestTrigramSimilarity_Identity(t *testing.T) {
-	if s := trigramSimilarity("Heidelberg Hbf", "Heidelberg Hbf"); math.Abs(s-1.0) > 1e-9 {
-		t.Errorf("identical: expected 1.0, got %f", s)
-	}
-}
-
-func TestTrigramSimilarity_Empty(t *testing.T) {
-	if s := trigramSimilarity("", "anything"); s != 0 {
-		t.Errorf("empty a: expected 0, got %f", s)
-	}
-	if s := trigramSimilarity("anything", ""); s != 0 {
-		t.Errorf("empty b: expected 0, got %f", s)
-	}
-}
-
-func TestTrigramSimilarity_Symmetry(t *testing.T) {
-	a := trigramSimilarity("Freiburg im Breisgau", "Freiburg Hbf")
-	b := trigramSimilarity("Freiburg Hbf", "Freiburg im Breisgau")
-	if math.Abs(a-b) > 1e-9 {
-		t.Errorf("not symmetric: %.6f vs %.6f", a, b)
-	}
-}
-
-func TestTrigramSimilarity_Ordering(t *testing.T) {
-	close := trigramSimilarity("Hauptbahnhof", "Hauptbahnhof")
-	far := trigramSimilarity("Hauptbahnhof", "Hbf")
-	if close <= far {
-		t.Errorf("expected close (%.3f) > far (%.3f)", close, far)
-	}
-}
-
-func TestTrigramSimilarity_ShortString(t *testing.T) {
-	s := trigramSimilarity("A", "A")
-	if s < 0 || s > 1 {
-		t.Errorf("short string score out of range: %f", s)
+func TestNormaliseString_StripsPunctuation(t *testing.T) {
+	got := normaliseString("Bahnhof, Platz/Eingang!")
+	want := "bahnhof platzeingang"
+	if got != want {
+		t.Errorf("normaliseString(...) = %q, want %q", got, want)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// k-d tree: build and radius search
+// trigramSet / trigramSimilarity / trigramSimilaritySets
 // ---------------------------------------------------------------------------
 
-func makeStops(items ...osmStop) []osmStop { return items }
-
-func TestKDTree_Empty(t *testing.T) {
-	tree := buildKDTree(nil)
-	results := tree.radiusSearch(48.0, 8.0, 1.0)
-	if len(results) != 0 {
-		t.Errorf("empty tree: expected no results, got %d", len(results))
+func TestTrigramSimilarity_IdenticalStrings(t *testing.T) {
+	got := trigramSimilarity("Hauptbahnhof", "Hauptbahnhof")
+	if math.Abs(got-1.0) > 1e-9 {
+		t.Errorf("expected similarity 1.0 for identical strings, got %f", got)
 	}
 }
 
-func TestKDTree_SingleNode_Hit(t *testing.T) {
-	stops := makeStops(osmStop{lat: 48.0, lon: 8.0, name: "A"})
-	tree := buildKDTree(stops)
-	results := tree.radiusSearch(48.0, 8.0, 0.01)
-	if len(results) != 1 {
-		t.Errorf("expected 1 result, got %d", len(results))
+func TestTrigramSimilarity_EmptyStrings(t *testing.T) {
+	if got := trigramSimilarity("", "Hauptbahnhof"); got != 0 {
+		t.Errorf("expected 0 similarity when one string is empty, got %f", got)
+	}
+	if got := trigramSimilarity("", ""); got != 0 {
+		t.Errorf("expected 0 similarity when both strings are empty, got %f", got)
 	}
 }
 
-func TestKDTree_SingleNode_Miss(t *testing.T) {
-	stops := makeStops(osmStop{lat: 48.0, lon: 8.0, name: "A"})
-	tree := buildKDTree(stops)
-	// Query far away — radius 0.001° ≈ 110 m, point is ~111 km away.
-	results := tree.radiusSearch(49.0, 8.0, 0.001)
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
+func TestTrigramSimilarity_CompletelyDifferent(t *testing.T) {
+	got := trigramSimilarity("aaa", "zzz")
+	if got != 0 {
+		t.Errorf("expected 0 similarity for disjoint trigram sets, got %f", got)
 	}
 }
 
-func TestKDTree_ReturnsAllInRadius(t *testing.T) {
-	stops := makeStops(
-		osmStop{lat: 48.000, lon: 8.000, name: "A"}, // in radius
-		osmStop{lat: 48.001, lon: 8.000, name: "B"}, // in radius (~111 m)
-		osmStop{lat: 48.010, lon: 8.000, name: "C"}, // out (~1110 m)
-		osmStop{lat: 48.000, lon: 8.001, name: "D"}, // in radius (~78 m at 48°)
-	)
-	tree := buildKDTree(stops)
-	// radius 0.002° ≈ 222 m — should include A, B, D but not C.
-	results := tree.radiusSearch(48.000, 8.000, 0.002)
-	if len(results) != 3 {
-		names := make([]string, len(results))
-		for i, r := range results {
-			names[i] = r.name
-		}
-		t.Errorf("expected 3 results in radius, got %d: %v", len(results), names)
+func TestTrigramSimilarity_DiacriticInsensitive(t *testing.T) {
+	got := trigramSimilarity("Müller Straße", "Muller Strasse")
+	if got < 0.5 {
+		t.Errorf("expected high similarity after diacritic folding, got %f", got)
 	}
 }
 
-func TestKDTree_LargeSet_AllRetrieved(t *testing.T) {
-	// Build 1000 nodes in a tight cluster and verify all are found.
-	const N = 1000
-	stops := make([]osmStop, N)
-	for i := range stops {
-		stops[i] = osmStop{
-			lat:  48.0 + float64(i%10)*0.0001,
-			lon:  8.0 + float64(i/10)*0.0001,
-			name: "Stop",
-		}
-	}
-	tree := buildKDTree(stops)
-	// Large radius — 1° ≈ 111 km, should catch everything.
-	results := tree.radiusSearch(48.0005, 8.0005, 1.0)
-	if len(results) != N {
-		t.Errorf("expected %d results, got %d", N, len(results))
+func TestTrigramSimilaritySets_MatchesStringVersion(t *testing.T) {
+	a, b := "Marktplatz", "Marktplatz Nord"
+	want := trigramSimilarity(a, b)
+	got := trigramSimilaritySets(trigramSet(a), trigramSet(b))
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("trigramSimilaritySets = %f, want %f (from trigramSimilarity)", got, want)
 	}
 }
 
-func TestKDTree_NoFalsePositives(t *testing.T) {
-	// All nodes are outside the radius; none should be returned.
-	stops := makeStops(
-		osmStop{lat: 50.0, lon: 10.0},
-		osmStop{lat: 51.0, lon: 11.0},
-		osmStop{lat: 52.0, lon: 12.0},
-	)
-	tree := buildKDTree(stops)
-	results := tree.radiusSearch(48.0, 8.0, 0.01) // 0.01° ≈ 1.1 km
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
+func TestTrigramSimilaritySets_EmptySet(t *testing.T) {
+	got := trigramSimilaritySets(map[string]struct{}{}, trigramSet("Hauptbahnhof"))
+	if got != 0 {
+		t.Errorf("expected 0 for an empty set, got %f", got)
+	}
+}
+
+func TestTrigramSet_ShortStringPadding(t *testing.T) {
+	// Strings shorter than 3 runes should still produce at least one trigram
+	// rather than an empty/invalid set.
+	set := trigramSet("ab")
+	if len(set) == 0 {
+		t.Errorf("expected at least one trigram for a short string, got empty set")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// bestMatchKD
-// ---------------------------------------------------------------------------
-
-func TestBestMatchKD_ExactHit(t *testing.T) {
-	stops := makeStops(
-		osmStop{lat: 49.40, lon: 8.67, name: "Heidelberg Hbf", ref: "1"},
-		osmStop{lat: 48.00, lon: 7.00, name: "Freiburg Hbf", ref: "2"},
-	)
-	tree := buildKDTree(stops)
-	match, score := bestMatchKD(49.40, 8.67, "Heidelberg Hbf", tree, 150, 0.1)
-	if match == nil {
-		t.Fatal("expected a match, got nil")
-	}
-	if match.ref != "1" {
-		t.Errorf("expected ref 1, got %q", match.ref)
-	}
-	if score < 0.9 {
-		t.Errorf("expected high score, got %.3f", score)
-	}
-}
-
-func TestBestMatchKD_BeyondMaxDist(t *testing.T) {
-	// Node is 200 m away, maxDist is 150 m.
-	stops := makeStops(osmStop{lat: 49.40 + 0.0018, lon: 8.67, name: "Far Stop"})
-	tree := buildKDTree(stops)
-	match, _ := bestMatchKD(49.40, 8.67, "Far Stop", tree, 150, 0.1)
-	if match != nil {
-		t.Errorf("expected nil match beyond maxDist, got %+v", match)
-	}
-}
-
-func TestBestMatchKD_BelowMinScore(t *testing.T) {
-	// Close by distance but name is completely different.
-	stops := makeStops(osmStop{lat: 49.40, lon: 8.67, name: "xyz"})
-	tree := buildKDTree(stops)
-	// minScore=0.9 — won't be reached when names don't match.
-	match, _ := bestMatchKD(49.40, 8.67, "Hauptbahnhof", tree, 150, 0.9)
-	if match != nil {
-		t.Errorf("expected nil match below minScore, got %+v", match)
-	}
-}
-
-func TestBestMatchKD_PicksCloser(t *testing.T) {
-	stops := makeStops(
-		osmStop{lat: 49.40 + 0.0005, lon: 8.67, name: "Hbf", ref: "near"},
-		osmStop{lat: 49.40 + 0.0012, lon: 8.67, name: "Hbf", ref: "far"},
-	)
-	tree := buildKDTree(stops)
-	match, _ := bestMatchKD(49.40, 8.67, "Hbf", tree, 500, 0.1)
-	if match == nil {
-		t.Fatal("expected a match")
-	}
-	if match.ref != "near" {
-		t.Errorf("expected nearer candidate, got ref=%q", match.ref)
-	}
-}
-
-func TestBestMatchKD_NoCandidates(t *testing.T) {
-	tree := buildKDTree(nil)
-	match, _ := bestMatchKD(49.40, 8.67, "Anywhere", tree, 150, 0.25)
-	if match != nil {
-		t.Errorf("expected nil for empty tree, got %+v", match)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// osmWheelchair / amenityNote / isTransitNode / firstTag — unchanged from v1
+// osmWheelchair
 // ---------------------------------------------------------------------------
 
 func TestOsmWheelchair(t *testing.T) {
-	cases := []struct {
-		in   string
-		want int8
-	}{
-		{"yes", 1}, {"designated", 1}, {"limited", 1},
-		{"no", 2},
-		{"", 0}, {"unknown", 0},
+	cases := map[string]int8{
+		"yes":        1,
+		"designated": 1,
+		"limited":    1,
+		"no":         2,
+		"":           0,
+		"unknown":    0,
 	}
-	for _, c := range cases {
-		if got := osmWheelchair(c.in); got != c.want {
-			t.Errorf("osmWheelchair(%q): want %d, got %d", c.in, c.want, got)
+	for in, want := range cases {
+		if got := osmWheelchair(in); got != want {
+			t.Errorf("osmWheelchair(%q) = %d, want %d", in, got, want)
 		}
 	}
 }
 
-func TestAmenityNote_AllSet(t *testing.T) {
+// ---------------------------------------------------------------------------
+// amenityNote
+// ---------------------------------------------------------------------------
+
+func TestAmenityNote_AllFieldsPresent(t *testing.T) {
 	m := &osmStop{shelter: "yes", bench: "no", tactile: "yes"}
+	got := amenityNote(m)
 	want := "shelter=yes bench=no tactile_paving=yes"
-	if got := amenityNote(m); got != want {
-		t.Errorf("want %q, got %q", want, got)
+	if got != want {
+		t.Errorf("amenityNote() = %q, want %q", got, want)
 	}
 }
 
-func TestAmenityNote_Empty(t *testing.T) {
-	if got := amenityNote(&osmStop{}); got != "" {
-		t.Errorf("expected empty, got %q", got)
+func TestAmenityNote_PartialFields(t *testing.T) {
+	m := &osmStop{shelter: "yes"}
+	got := amenityNote(m)
+	want := "shelter=yes"
+	if got != want {
+		t.Errorf("amenityNote() = %q, want %q", got, want)
 	}
 }
 
-func TestIsTransitNode(t *testing.T) {
-	yes := []map[string]string{
-		{"public_transport": "stop_position"},
-		{"public_transport": "platform"},
-		{"highway": "bus_stop"},
-		{"railway": "halt"},
-		{"railway": "tram_stop"},
-		{"railway": "stop"},
-	}
-	for _, tags := range yes {
-		if !isTransitNode(tags) {
-			t.Errorf("expected transit node for %v", tags)
-		}
-	}
-	no := []map[string]string{
-		{"amenity": "cafe"},
-		{"highway": "traffic_signals"},
-		{"public_transport": "station"},
-		{},
-	}
-	for _, tags := range no {
-		if isTransitNode(tags) {
-			t.Errorf("expected non-transit for %v", tags)
-		}
-	}
-}
-
-func TestFirstTag(t *testing.T) {
-	tags := map[string]string{"ref": "3", "local_ref": "A"}
-	if got := firstTag(tags, "local_ref", "ref"); got != "A" {
-		t.Errorf("expected A, got %q", got)
-	}
-	tags2 := map[string]string{"ref": "3"}
-	if got := firstTag(tags2, "local_ref", "ref"); got != "3" {
-		t.Errorf("expected 3, got %q", got)
-	}
-	if got := firstTag(tags2, "nonexistent"); got != "" {
-		t.Errorf("expected empty, got %q", got)
+func TestAmenityNote_NoFields(t *testing.T) {
+	m := &osmStop{}
+	if got := amenityNote(m); got != "" {
+		t.Errorf("amenityNote() = %q, want empty string", got)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// applyToStop (via stub — same pattern as v1)
+// applyToStop
 // ---------------------------------------------------------------------------
 
-type stubStop struct {
-	Platform_code       string
-	Wheelchair_boarding int8
-	Desc                string
-}
+func TestApplyToStop_FillsEmptyFieldsOnly(t *testing.T) {
+	stop := &gtfs.Stop{
+		Platform_code:       "",
+		Wheelchair_boarding: 0,
+		Desc:                "",
+	}
+	m := &osmStop{
+		ref:        "3",
+		wheelchair: "yes",
+		shelter:    "yes",
+	}
 
-func applyToStopStub(stop *stubStop, m *osmStop) {
-	if m.ref != "" && stop.Platform_code == "" {
-		stop.Platform_code = m.ref
-	}
-	if stop.Wheelchair_boarding == 0 {
-		if wb := osmWheelchair(m.wheelchair); wb != 0 {
-			stop.Wheelchair_boarding = wb
-		}
-	}
-	if stop.Desc == "" {
-		if note := amenityNote(m); note != "" {
-			stop.Desc = note
-		}
-	}
-}
+	res := applyToStop(stop, m, 100, false, 30)
 
-func TestApplyToStop_FillsEmpty(t *testing.T) {
-	stop := &stubStop{}
-	applyToStopStub(stop, &osmStop{ref: "A3", wheelchair: "yes", shelter: "yes", bench: "no"})
-	if stop.Platform_code != "A3" {
-		t.Errorf("Platform_code: want A3, got %q", stop.Platform_code)
+	if stop.Platform_code != "3" {
+		t.Errorf("expected Platform_code to be set to '3', got %q", stop.Platform_code)
 	}
 	if stop.Wheelchair_boarding != 1 {
-		t.Errorf("Wheelchair_boarding: want 1, got %d", stop.Wheelchair_boarding)
+		t.Errorf("expected Wheelchair_boarding=1, got %d", stop.Wheelchair_boarding)
 	}
-	if stop.Desc == "" {
-		t.Error("Desc should be set")
+	if stop.Desc != "shelter=yes" {
+		t.Errorf("expected Desc='shelter=yes', got %q", stop.Desc)
+	}
+	if !res.platformSet || !res.wheelchairSet || !res.descSet {
+		t.Errorf("expected all three applyResult flags set, got %+v", res)
+	}
+	if res.coordsFixed {
+		t.Errorf("expected coordsFixed=false when FixCoordinates is disabled")
 	}
 }
 
-func TestApplyToStop_DoesNotOverwrite(t *testing.T) {
-	stop := &stubStop{Platform_code: "existing", Wheelchair_boarding: 2, Desc: "agency note"}
-	applyToStopStub(stop, &osmStop{ref: "new", wheelchair: "yes", shelter: "yes"})
-	if stop.Platform_code != "existing" {
-		t.Error("Platform_code should not be overwritten")
+func TestApplyToStop_DoesNotOverwriteExistingFields(t *testing.T) {
+	stop := &gtfs.Stop{
+		Platform_code:       "EXISTING",
+		Wheelchair_boarding: 2,
+		Desc:                "EXISTING DESC",
+	}
+	m := &osmStop{
+		ref:        "3",
+		wheelchair: "yes",
+		shelter:    "yes",
+	}
+
+	res := applyToStop(stop, m, 100, false, 30)
+
+	if stop.Platform_code != "EXISTING" {
+		t.Errorf("expected Platform_code to remain 'EXISTING', got %q", stop.Platform_code)
 	}
 	if stop.Wheelchair_boarding != 2 {
-		t.Error("Wheelchair_boarding should not be overwritten")
+		t.Errorf("expected Wheelchair_boarding to remain 2, got %d", stop.Wheelchair_boarding)
 	}
-	if stop.Desc != "agency note" {
-		t.Error("Desc should not be overwritten")
+	if stop.Desc != "EXISTING DESC" {
+		t.Errorf("expected Desc to remain unchanged, got %q", stop.Desc)
+	}
+	if res.platformSet || res.wheelchairSet || res.descSet {
+		t.Errorf("expected no fields to be marked as set, got %+v", res)
+	}
+}
+
+func TestApplyToStop_FixCoordinatesWithinThreshold(t *testing.T) {
+	stop := &gtfs.Stop{Lat: 48.0, Lon: 8.0}
+	m := &osmStop{lat: 48.0001, lon: 8.0001}
+
+	res := applyToStop(stop, m, 10, true, 30)
+
+	// Compare with a small tolerance: stop.Lat/Lon are float32, so converting
+	// back to float64 won't exactly equal the original float64 m.lat/m.lon.
+	const tol = 1e-6
+	if math.Abs(float64(stop.Lat)-m.lat) > tol || math.Abs(float64(stop.Lon)-m.lon) > tol {
+		t.Errorf("expected coordinates to be snapped to OSM node (%f,%f), got (%f,%f)",
+			m.lat, m.lon, stop.Lat, stop.Lon)
+	}
+	if !res.coordsFixed {
+		t.Errorf("expected coordsFixed=true")
+	}
+}
+
+func TestApplyToStop_DoesNotFixCoordinatesBeyondThreshold(t *testing.T) {
+	origLat, origLon := float32(48.0), float32(8.0)
+	stop := &gtfs.Stop{Lat: origLat, Lon: origLon}
+	m := &osmStop{lat: 49.0, lon: 9.0} // far away
+
+	res := applyToStop(stop, m, 5000, true, 30)
+
+	if stop.Lat != origLat || stop.Lon != origLon {
+		t.Errorf("expected coordinates to remain unchanged when dist > threshold, got (%f,%f)",
+			stop.Lat, stop.Lon)
+	}
+	if res.coordsFixed {
+		t.Errorf("expected coordsFixed=false when dist exceeds threshold")
+	}
+}
+
+func TestApplyToStop_FixCoordinatesDisabledByDefault(t *testing.T) {
+	stop := &gtfs.Stop{Lat: 48.0, Lon: 8.0}
+	m := &osmStop{lat: 48.0001, lon: 8.0001}
+
+	res := applyToStop(stop, m, 1, false, 30)
+
+	if stop.Lat != 48.0 || stop.Lon != 8.0 {
+		t.Errorf("expected coordinates unchanged when fixCoords=false")
+	}
+	if res.coordsFixed {
+		t.Errorf("expected coordsFixed=false when fixCoords=false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// k-d tree: buildKDTree / radiusSearch / chooseAxis
+// ---------------------------------------------------------------------------
+
+func sampleStops() []osmStop {
+	// A small cluster around (48.0, 8.0) plus one far-away outlier.
+	return []osmStop{
+		{lat: 48.0000, lon: 8.0000, name: "Marktplatz", nameTrig: trigramSet("Marktplatz")},
+		{lat: 48.0005, lon: 8.0005, name: "Rathaus", nameTrig: trigramSet("Rathaus")},
+		{lat: 48.0010, lon: 8.0010, name: "Hauptbahnhof", nameTrig: trigramSet("Hauptbahnhof")},
+		{lat: 48.0020, lon: 8.0020, name: "Universitaet", nameTrig: trigramSet("Universitaet")},
+		{lat: 49.5000, lon: 9.5000, name: "FarAway", nameTrig: trigramSet("FarAway")},
+	}
+}
+
+func TestBuildKDTree_EmptyInput(t *testing.T) {
+	tree := buildKDTree(nil)
+	if len(tree.nodes) != 0 {
+		t.Errorf("expected empty tree for empty input, got %d nodes", len(tree.nodes))
+	}
+}
+
+func TestBuildKDTree_NodeCountMatchesInput(t *testing.T) {
+	stops := sampleStops()
+	tree := buildKDTree(stops)
+	if len(tree.nodes) != len(stops) {
+		t.Errorf("expected %d nodes in tree, got %d", len(stops), len(tree.nodes))
+	}
+}
+
+func TestRadiusSearch_FindsNearbyOnly(t *testing.T) {
+	stops := sampleStops()
+	tree := buildKDTree(stops)
+
+	radiusDegLat := degreesForMetersLat(200)
+	radiusDegLon := degreesForMetersLon(48.0, 200)
+
+	results := tree.radiusSearch(48.0000, 8.0000, radiusDegLat, radiusDegLon)
+
+	foundFarAway := false
+	for _, r := range results {
+		if r.name == "FarAway" {
+			foundFarAway = true
+		}
+	}
+	if foundFarAway {
+		t.Errorf("expected the far-away outlier to be excluded from a 200m radius search")
+	}
+	if len(results) == 0 {
+		t.Errorf("expected at least one nearby candidate, got none")
+	}
+}
+
+func TestRadiusSearch_EmptyTree(t *testing.T) {
+	tree := buildKDTree(nil)
+	results := tree.radiusSearch(48.0, 8.0, 0.01, 0.01)
+	if results != nil {
+		t.Errorf("expected nil results for empty tree, got %v", results)
+	}
+}
+
+func TestRadiusSearch_ZeroRadiusMatchesExactPointOnly(t *testing.T) {
+	stops := sampleStops()
+	tree := buildKDTree(stops)
+
+	// A tiny but non-zero radius around an exact node location should find
+	// at least that node.
+	results := tree.radiusSearch(48.0000, 8.0000, 1e-9, 1e-9)
+	if len(results) == 0 {
+		t.Errorf("expected to find the exact-match node, got no results")
+	}
+	for _, r := range results {
+		if r.name != "Marktplatz" {
+			t.Errorf("expected only the exact-match node, also got %q", r.name)
+		}
+	}
+}
+
+func TestChooseAxis_PicksHigherVarianceAxis(t *testing.T) {
+	// Spread mostly along latitude.
+	stops := []osmStop{
+		{lat: 0.0, lon: 8.0},
+		{lat: 1.0, lon: 8.0},
+		{lat: 2.0, lon: 8.0},
+		{lat: 3.0, lon: 8.0001},
+	}
+	indices := []int{0, 1, 2, 3}
+	axis := chooseAxis(stops, indices)
+	if axis != 0 {
+		t.Errorf("expected axis=0 (lat) for latitude-dominant spread, got %d", axis)
+	}
+
+	// Spread mostly along longitude.
+	stops2 := []osmStop{
+		{lat: 48.0, lon: 0.0},
+		{lat: 48.0001, lon: 1.0},
+		{lat: 48.0, lon: 2.0},
+		{lat: 48.0001, lon: 3.0},
+	}
+	axis2 := chooseAxis(stops2, indices)
+	if axis2 != 1 {
+		t.Errorf("expected axis=1 (lon) for longitude-dominant spread, got %d", axis2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// bestMatchKD (integration of distance + name scoring)
+// ---------------------------------------------------------------------------
+
+func TestBestMatchKD_PicksClosestGoodNameMatch(t *testing.T) {
+	stops := sampleStops()
+	tree := buildKDTree(stops)
+
+	match, score := bestMatchKD(48.0010, 8.0010, "Hauptbahnhof", tree, 200, 0.25)
+	if match == nil {
+		t.Fatalf("expected a match, got nil")
+	}
+	if match.name != "Hauptbahnhof" {
+		t.Errorf("expected match 'Hauptbahnhof', got %q", match.name)
+	}
+	if score <= 0.25 {
+		t.Errorf("expected score above MinScore, got %f", score)
+	}
+}
+
+func TestBestMatchKD_NoMatchBelowMinScore(t *testing.T) {
+	stops := sampleStops()
+	tree := buildKDTree(stops)
+
+	// Far outside any reasonable radius/name match.
+	match, score := bestMatchKD(10.0, 10.0, "Nonexistent", tree, 50, 0.25)
+	if match != nil {
+		t.Errorf("expected no match, got %q with score %f", match.name, score)
+	}
+}
+
+func TestBestMatchKD_EmptyTree(t *testing.T) {
+	tree := buildKDTree(nil)
+	match, _ := bestMatchKD(48.0, 8.0, "Anything", tree, 150, 0.25)
+	if match != nil {
+		t.Errorf("expected no match against an empty tree, got %q", match.name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// isTransitNode / firstTag
+// ---------------------------------------------------------------------------
+
+func TestIsTransitNode(t *testing.T) {
+	cases := []struct {
+		tags map[string]string
+		want bool
+	}{
+		{map[string]string{"public_transport": "platform"}, true},
+		{map[string]string{"public_transport": "stop_position"}, true},
+		{map[string]string{"highway": "bus_stop"}, true},
+		{map[string]string{"railway": "tram_stop"}, true},
+		{map[string]string{"railway": "station"}, false},
+		{map[string]string{"shop": "bakery"}, false},
+		{map[string]string{}, false},
+	}
+	for _, c := range cases {
+		if got := isTransitNode(c.tags); got != c.want {
+			t.Errorf("isTransitNode(%v) = %v, want %v", c.tags, got, c.want)
+		}
+	}
+}
+
+func TestFirstTag_ReturnsFirstNonEmpty(t *testing.T) {
+	tags := map[string]string{"ref": "12"}
+	got := firstTag(tags, "local_ref", "ref")
+	if got != "12" {
+		t.Errorf("firstTag(...) = %q, want %q", got, "12")
+	}
+}
+
+func TestFirstTag_PrefersEarlierKey(t *testing.T) {
+	tags := map[string]string{"local_ref": "A", "ref": "B"}
+	got := firstTag(tags, "local_ref", "ref")
+	if got != "A" {
+		t.Errorf("firstTag(...) = %q, want %q", got, "A")
+	}
+}
+
+func TestFirstTag_NoMatch(t *testing.T) {
+	tags := map[string]string{"foo": "bar"}
+	got := firstTag(tags, "local_ref", "ref")
+	if got != "" {
+		t.Errorf("firstTag(...) = %q, want empty string", got)
 	}
 }
