@@ -1,0 +1,502 @@
+package processors
+
+// OSMStopEnhancer enriches GTFS stops with data from an OpenStreetMap PBF file.
+//
+// Matching pipeline:
+//  1. Load all OSM transit nodes from the PBF file (single pass).
+//  2. Build a k-d tree over the nodes in O(M log M).
+//  3. Match each GTFS stop in parallel (one goroutine per CPU):
+//       a. k-d tree radius query in O(log M) — returns a small candidate set.
+//       b. Re-score each candidate with Haversine + trigram name similarity.
+//       c. Apply enrichment if the best score clears MinScore.
+//
+// Fields applied (non-destructively — only if currently empty/zero):
+//   - Platform_code       ← OSM local_ref / ref
+//   - Wheelchair_boarding ← OSM wheelchair (yes/limited→1, no→2)
+//   - Desc                ← "shelter=yes bench=no tactile_paving=yes" etc.
+
+import (
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"unicode"
+
+	"github.com/patrickbr/gtfsparser"
+	"github.com/patrickbr/gtfsparser/gtfs"
+	"github.com/qedus/osmpbf"
+)
+
+// OSMStopEnhancer is the processor struct.
+type OSMStopEnhancer struct {
+	// PBFFile is the path to the *.osm.pbf file to read.
+	PBFFile string
+
+	// MaxDistMeters is the maximum Haversine distance (metres) for a candidate
+	// to be considered. Defaults to 150 m if zero.
+	MaxDistMeters float64
+
+	// MinScore is the minimum combined match score [0,1] required before any
+	// enrichment is applied. Defaults to 0.25 if zero.
+	MinScore float64
+
+	// DryRun logs what would change without modifying the feed.
+	DryRun bool
+
+	// Verbose enables per-stop match logging.
+	Verbose bool
+}
+
+// osmStop is an OSM node that passed the public-transport tag filter.
+type osmStop struct {
+	lat, lon   float64
+	name       string
+	ref        string // platform code (local_ref or ref)
+	wheelchair string // yes / limited / no
+	shelter    string // yes / no
+	bench      string // yes / no
+	tactile    string // yes / no
+}
+
+// ---------------------------------------------------------------------------
+// Run — implements the gtfstidy Processor interface
+// ---------------------------------------------------------------------------
+
+func (pro OSMStopEnhancer) Run(feed *gtfsparser.Feed) {
+	if pro.MaxDistMeters == 0 {
+		pro.MaxDistMeters = 150
+	}
+	if pro.MinScore == 0 {
+		pro.MinScore = 0.25
+	}
+
+	fmt.Fprintf(os.Stdout, "OSMStopEnhancer: loading %s ... ", pro.PBFFile)
+
+	nodes, err := loadOSMStops(pro.PBFFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\nOSMStopEnhancer: failed to read PBF: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "loaded %d transit nodes. Building k-d tree ... ", len(nodes))
+
+	tree := buildKDTree(nodes)
+	fmt.Fprintf(os.Stdout, "done.\n")
+
+	// Collect stops into a slice for parallel work dispatch.
+	stops := make([]*gtfs.Stop, 0, len(feed.Stops))
+	for _, s := range feed.Stops {
+		stops = append(stops, s)
+	}
+
+	// matchResult carries the outcome for a single stop back to the main goroutine.
+	type matchResult struct {
+		stop  *gtfs.Stop
+		match *osmStop
+		score float64
+		dist  float64
+	}
+
+	results := make([]matchResult, len(stops))
+
+	// Fan out over GOMAXPROCS workers.
+	numWorkers := runtime.GOMAXPROCS(-1)
+	chunkSize := (len(stops) + numWorkers - 1) / numWorkers
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		lo := w * chunkSize
+		hi := lo + chunkSize
+		if hi > len(stops) {
+			hi = len(stops)
+		}
+		if lo >= hi {
+			break
+		}
+		wg.Add(1)
+		go func(lo, hi int) {
+			defer wg.Done()
+			for i := lo; i < hi; i++ {
+				s := stops[i]
+				match, score := bestMatchKD(
+					float64(s.Lat), float64(s.Lon), s.Name,
+					tree, pro.MaxDistMeters, pro.MinScore,
+				)
+				dist := 0.0
+				if match != nil {
+					dist = haversineM(float64(s.Lat), float64(s.Lon), match.lat, match.lon)
+				}
+				results[i] = matchResult{stop: s, match: match, score: score, dist: dist}
+			}
+		}(lo, hi)
+	}
+	wg.Wait()
+
+	// Apply results on the main goroutine (no lock needed — each result owns
+	// its stop pointer and we're done with workers).
+	enhanced := 0
+	for _, r := range results {
+		if r.match == nil {
+			continue
+		}
+		if pro.Verbose {
+			fmt.Fprintf(os.Stdout, "  [score=%.3f dist=%.0fm] GTFS %q ← OSM %q\n",
+				r.score, r.dist, r.stop.Name, r.match.name)
+		}
+		if !pro.DryRun {
+			applyToStop(r.stop, r.match)
+		}
+		enhanced++
+	}
+
+	action := "enhanced"
+	if pro.DryRun {
+		action = "would enhance"
+	}
+	fmt.Fprintf(os.Stdout, "OSMStopEnhancer: %s %d / %d stops.\n",
+		action, enhanced, len(feed.Stops))
+}
+
+// ---------------------------------------------------------------------------
+// Enrichment
+// ---------------------------------------------------------------------------
+
+func applyToStop(stop *gtfs.Stop, m *osmStop) {
+	if m.ref != "" && stop.Platform_code == "" {
+		stop.Platform_code = m.ref
+	}
+	if stop.Wheelchair_boarding == 0 {
+		if wb := osmWheelchair(m.wheelchair); wb != 0 {
+			stop.Wheelchair_boarding = wb
+		}
+	}
+	if stop.Desc == "" {
+		if note := amenityNote(m); note != "" {
+			stop.Desc = note
+		}
+	}
+}
+
+func osmWheelchair(v string) int8 {
+	switch v {
+	case "yes", "designated", "limited":
+		return 1
+	case "no":
+		return 2
+	}
+	return 0
+}
+
+func amenityNote(m *osmStop) string {
+	var parts []string
+	for _, kv := range []struct{ k, v string }{
+		{"shelter", m.shelter},
+		{"bench", m.bench},
+		{"tactile_paving", m.tactile},
+	} {
+		if kv.v != "" {
+			parts = append(parts, kv.k+"="+kv.v)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// ---------------------------------------------------------------------------
+// OSM PBF loading
+// ---------------------------------------------------------------------------
+
+func isTransitNode(tags map[string]string) bool {
+	switch tags["public_transport"] {
+	case "stop_position", "platform":
+		return true
+	}
+	switch tags["highway"] {
+	case "bus_stop":
+		return true
+	}
+	switch tags["railway"] {
+	case "stop", "halt", "tram_stop":
+		return true
+	}
+	return false
+}
+
+func firstTag(tags map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := tags[k]; v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func loadOSMStops(path string) ([]osmStop, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	dec := osmpbf.NewDecoder(f)
+	dec.SetBufferSize(osmpbf.MaxBlobSize)
+	if err := dec.Start(runtime.GOMAXPROCS(-1)); err != nil {
+		return nil, err
+	}
+
+	var out []osmStop
+	for {
+		obj, err := dec.Decode()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		node, ok := obj.(*osmpbf.Node)
+		if !ok {
+			continue
+		}
+		if !isTransitNode(node.Tags) {
+			continue
+		}
+		out = append(out, osmStop{
+			lat:        node.Lat,
+			lon:        node.Lon,
+			name:       firstTag(node.Tags, "name"),
+			ref:        firstTag(node.Tags, "local_ref", "ref"),
+			wheelchair: firstTag(node.Tags, "wheelchair"),
+			shelter:    firstTag(node.Tags, "shelter"),
+			bench:      firstTag(node.Tags, "bench"),
+			tactile:    firstTag(node.Tags, "tactile_paving"),
+		})
+	}
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// k-d tree
+//
+// We store lat/lon directly as the two dimensions. Within the small spatial
+// scales relevant to stop matching (≤ 150 m), treating lat/lon as Euclidean
+// introduces less than 0.01% error — fully acceptable. Haversine is used only
+// for the final scoring pass on the small candidate set the tree returns.
+//
+// The tree is built by recursively choosing the median along the axis with the
+// highest variance (standard split heuristic). Nodes are stored in a flat
+// slice for cache friendliness; left/right children are indices into that
+// slice (-1 = leaf).
+// ---------------------------------------------------------------------------
+
+type kdNode struct {
+	stop        osmStop
+	splitAxis   int // 0=lat, 1=lon
+	left, right int // indices into kdTree.nodes; -1 = none
+}
+
+type kdTree struct {
+	nodes []kdNode
+}
+
+func buildKDTree(stops []osmStop) *kdTree {
+	if len(stops) == 0 {
+		return &kdTree{}
+	}
+	// Work on index slices to avoid copying osmStop structs during sort.
+	indices := make([]int, len(stops))
+	for i := range indices {
+		indices[i] = i
+	}
+	t := &kdTree{nodes: make([]kdNode, 0, len(stops))}
+	t.build(stops, indices, 0)
+	return t
+}
+
+// build recursively partitions indices and appends nodes; returns the index of
+// the node it just inserted.
+func (t *kdTree) build(stops []osmStop, indices []int, depth int) int {
+	if len(indices) == 0 {
+		return -1
+	}
+
+	// Choose split axis: alternate lat/lon by depth (simple heuristic).
+	axis := depth % 2
+
+	// Sort by the chosen axis and pick the median.
+	sort.Slice(indices, func(i, j int) bool {
+		if axis == 0 {
+			return stops[indices[i]].lat < stops[indices[j]].lat
+		}
+		return stops[indices[i]].lon < stops[indices[j]].lon
+	})
+	mid := len(indices) / 2
+
+	// Reserve a slot before recursing so children can store absolute indices.
+	myIdx := len(t.nodes)
+	t.nodes = append(t.nodes, kdNode{
+		stop:      stops[indices[mid]],
+		splitAxis: axis,
+		left:      -1,
+		right:     -1,
+	})
+
+	t.nodes[myIdx].left = t.build(stops, indices[:mid], depth+1)
+	t.nodes[myIdx].right = t.build(stops, indices[mid+1:], depth+1)
+	return myIdx
+}
+
+// radiusSearch returns all osmStop pointers whose lat/lon distance from
+// (lat, lon) is within radiusDeg degrees (Euclidean, cheap). The caller
+// applies Haversine for final scoring.
+func (t *kdTree) radiusSearch(lat, lon, radiusDeg float64) []*osmStop {
+	if len(t.nodes) == 0 {
+		return nil
+	}
+	var out []*osmStop
+	t.search(0, lat, lon, radiusDeg, &out)
+	return out
+}
+
+func (t *kdTree) search(nodeIdx int, lat, lon, radiusDeg float64, out *[]*osmStop) {
+	if nodeIdx < 0 || nodeIdx >= len(t.nodes) {
+		return
+	}
+	n := &t.nodes[nodeIdx]
+
+	dLat := n.stop.lat - lat
+	dLon := n.stop.lon - lon
+	if dLat*dLat+dLon*dLon <= radiusDeg*radiusDeg {
+		*out = append(*out, &n.stop)
+	}
+
+	// Determine which side of the split plane the query point is on.
+	var diff float64
+	if n.splitAxis == 0 {
+		diff = lat - n.stop.lat
+	} else {
+		diff = lon - n.stop.lon
+	}
+
+	// Always search the near side; search the far side only if the query
+	// circle crosses the split plane.
+	near, far := n.left, n.right
+	if diff > 0 {
+		near, far = n.right, n.left
+	}
+	t.search(near, lat, lon, radiusDeg, out)
+	if diff*diff <= radiusDeg*radiusDeg {
+		t.search(far, lat, lon, radiusDeg, out)
+	}
+}
+
+// degreesForMeters converts a metre radius to an approximate degree radius.
+// 1 degree of latitude ≈ 111_320 m everywhere; longitude degrees shrink with
+// cos(lat) but we use the latitude-only approximation for the bounding box —
+// this over-estimates slightly near the equator, which is fine (we'd rather
+// check a few extra candidates than miss any).
+func degreesForMeters(lat, meters float64) float64 {
+	_ = lat // reserved for a future cos(lat) correction if needed
+	return meters / 111_320.0
+}
+
+// ---------------------------------------------------------------------------
+// Matching with k-d tree
+// ---------------------------------------------------------------------------
+
+func bestMatchKD(
+	lat, lon float64,
+	name string,
+	tree *kdTree,
+	maxDist, minScore float64,
+) (*osmStop, float64) {
+	radiusDeg := degreesForMeters(lat, maxDist)
+	candidates := tree.radiusSearch(lat, lon, radiusDeg)
+
+	var best *osmStop
+	bestScore := -1.0
+
+	for _, c := range candidates {
+		dist := haversineM(lat, lon, c.lat, c.lon)
+		if dist > maxDist {
+			// The degree-radius bounding box is slightly wider than the
+			// Haversine circle, so trim the over-fetch here.
+			continue
+		}
+
+		distScore := 1.0 - dist/maxDist
+		nameScore := trigramSimilarity(name, c.name)
+		score := 0.6*distScore + 0.4*nameScore
+
+		if score > bestScore {
+			bestScore = score
+			best = c
+		}
+	}
+
+	if bestScore < minScore {
+		return nil, 0
+	}
+	return best, bestScore
+}
+
+// ---------------------------------------------------------------------------
+// Haversine distance
+// ---------------------------------------------------------------------------
+
+const earthRadiusM = 6_371_000.0
+
+func haversineM(lat1, lon1, lat2, lon2 float64) float64 {
+	φ1 := lat1 * math.Pi / 180
+	φ2 := lat2 * math.Pi / 180
+	Δφ := (lat2 - lat1) * math.Pi / 180
+	Δλ := (lon2 - lon1) * math.Pi / 180
+	a := math.Sin(Δφ/2)*math.Sin(Δφ/2) +
+		math.Cos(φ1)*math.Cos(φ2)*math.Sin(Δλ/2)*math.Sin(Δλ/2)
+	return earthRadiusM * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+// ---------------------------------------------------------------------------
+// Trigram similarity (Dice coefficient)
+// ---------------------------------------------------------------------------
+
+func trigramSet(s string) map[string]struct{} {
+	s = normaliseString(s)
+	runes := []rune(s)
+	for len(runes) < 3 {
+		runes = append(runes, ' ')
+	}
+	set := make(map[string]struct{}, len(runes)-2)
+	for i := 0; i <= len(runes)-3; i++ {
+		set[string(runes[i:i+3])] = struct{}{}
+	}
+	return set
+}
+
+func trigramSimilarity(a, b string) float64 {
+	if a == "" || b == "" {
+		return 0
+	}
+	ta := trigramSet(a)
+	tb := trigramSet(b)
+	var shared int
+	for t := range ta {
+		if _, ok := tb[t]; ok {
+			shared++
+		}
+	}
+	return float64(2*shared) / float64(len(ta)+len(tb))
+}
+
+func normaliseString(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}

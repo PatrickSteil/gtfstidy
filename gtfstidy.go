@@ -202,6 +202,12 @@ func main() {
 	useGoogleSupportedRouteTypes := flag.BoolP("google-supported-route-types", "", false, "Only use (extended) route types supported by Google")
 	motFilterStr := flag.StringP("keep-mots", "M", "", "comma-separated list of MOTs to keep, empty filter (default) keeps all")
 	motFilterNegStr := flag.StringP("drop-mots", "N", "", "comma-separated list of MOTs to drop")
+
+	osmPath := flag.StringP("osm-pbf", "", "", "OSM PBF file for stop enrichment")
+	osmMaxDist := flag.Float64P("osm-max-dist", "", 150, "max match distance in metres")
+	osmMinScore := flag.Float64P("osm-min-score", "", 0.25, "min match score [0,1]")
+	osmVerbose := flag.BoolP("osm-verbose", "", false, "be verbose while osm matching")
+
 	help := flag.BoolP("help", "?", false, "this message")
 
 	flag.Parse()
@@ -691,6 +697,15 @@ func main() {
 
 		if *ensureParents {
 			minzers = append(minzers, processors.StopParentEnforcer{})
+		}
+
+		if *osmPath != "" {
+			minzers = append(minzers, processors.OSMStopEnhancer{
+				PBFFile:       *osmPath,
+				MaxDistMeters: *osmMaxDist,
+				MinScore:      *osmMinScore,
+				Verbose:       *osmVerbose,
+			})
 		}
 
 		if *useIDMinimizerNum {
