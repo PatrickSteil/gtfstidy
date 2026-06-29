@@ -62,8 +62,12 @@ func NewStopClusterIdx(clusters []*StopCluster, cellWidth, cellHeight float64) *
 	}
 
 	for _, cluster := range clusters {
+		// FIX 3: use getStopLatLon consistently for Parents (not raw s.Lat/s.Lon)
+		// to avoid inserting NaN coordinates for stops with optional location types.
 		for _, s := range cluster.Parents {
 			x, y := latLngToWebMerc(getStopLatLon(s))
+			// FIX 1: two independent if-blocks instead of if/else if,
+			// so that a point equal to llx still updates urx (and vice versa).
 			if x < idx.llx {
 				idx.llx = x
 			}
@@ -109,7 +113,8 @@ func NewStopClusterIdx(clusters []*StopCluster, cellWidth, cellHeight float64) *
 	idx.xWidth = uint(math.Ceil(idx.width / idx.cellWidth))
 	idx.yHeight = uint(math.Ceil(idx.height / idx.cellHeight))
 
-	// In case we got one coodinate, the width and height should be > 0
+	// If all stops share the same coordinate, Ceil(0/cell) == 0;
+	// clamp to 1 so the grid is never empty and cellIndex stays valid.
 	if idx.xWidth == 0 {
 		idx.xWidth = 1
 	}
@@ -117,9 +122,12 @@ func NewStopClusterIdx(clusters []*StopCluster, cellWidth, cellHeight float64) *
 		idx.yHeight = 1
 	}
 
+	// FIX 4: flat 1D grid instead of [][]map[int]bool.
+	// Each cell is a nil []int32 until first use (lazy init in Add).
 	idx.grid = make([][]int32, idx.xWidth*idx.yHeight)
 
 	for cid, cluster := range clusters {
+		// FIX 3 (cont.): use getStopLatLon for Parents during insertion too.
 		for _, s := range cluster.Parents {
 			lat, lon := getStopLatLon(s)
 			idx.Add(float64(lat), float64(lon), int32(cid))
@@ -154,12 +162,12 @@ func (gi *StopClusterIdx) Add(lat float64, lon float64, obj int32) {
 func (gi *StopClusterIdx) GetNeighbors(excludeCid int, c *StopCluster, d float64) map[int]bool {
 	ret := make(map[int]bool)
 
-	// empty or degenerate index
 	if gi.xWidth == 0 || gi.yHeight == 0 || len(gi.grid) == 0 {
 		return ret
 	}
 
 	for _, st := range c.Parents {
+		// FIX 3 (cont.): use getStopLatLon for Parents
 		lat, lon := getStopLatLon(st)
 		neighs := gi.GetNeighborsByLatLon(float64(lat), float64(lon), d)
 		for cid := range neighs {
@@ -186,7 +194,6 @@ func (gi *StopClusterIdx) GetNeighbors(excludeCid int, c *StopCluster, d float64
 func (gi *StopClusterIdx) GetNeighborsByLatLon(lat float64, lon float64, d float64) map[int]bool {
 	ret := make(map[int]bool)
 
-	// empty or degenerate index
 	if gi.xWidth == 0 || gi.yHeight == 0 || len(gi.grid) == 0 {
 		return ret
 	}
@@ -199,6 +206,10 @@ func (gi *StopClusterIdx) GetNeighborsByLatLon(lat float64, lon float64, d float
 	cx := gi.getCellXFromX(lx)
 	cy := gi.getCellYFromY(ly)
 
+	// FIX 2: compute the neighbor window with a single, correct subtraction.
+	// The old code subtracted xPerm twice (once in the max(0,...) and once
+	// in the if/else block below it), causing a window that was too narrow
+	// and missing legitimate neighbors.
 	var swX, swY uint
 	if cx >= xPerm {
 		swX = cx - xPerm
