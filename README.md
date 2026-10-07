@@ -652,6 +652,24 @@ BFC,DTA,20,Bullfrog - Furnace Creek Resort,3
 STBA,DTA,30,Stagecoach - Airport Shuttle,3
 ```
 
+### Connectivity analyzer
+
+---
+
+Prints a report on the connectivity of the feed. It does not modify the feed. Stops are joined into connected components by consecutive stop times of a trip, by `transfers.txt` entries, and by their parent stations. For every component (largest first), the report lists the number of served stops, routes and trips. Stops that appear in no stop time are counted separately.
+
+The report also covers calendar gaps: the runs of days between the first and last day with service on which no trip is served at all, and, per component, the longest run of days without service at a single stop (between the first and last day that stop is served).
+
+#### Flags
+
+* `--analyze-connectivity`: print the connectivity report
+
+If this is the only processor that is run and no output (`-o`) is given explicitly, no GTFS feed is written. Parse-time options like `--keep-mots` or `--date-start` still apply, and can be used to scope the analysis.
+
+#### Modifies
+
+Nothing
+
 ## 6. Processing order
 
 The order in which feed processors are called is *always the same*, regardless of the flag ordering. The processors are run in this order:
@@ -667,6 +685,7 @@ The order in which feed processors are called is *always the same*, regardless o
 9. Minimize services (`-c`)
 10. Minimize stop-times/trips (`-T`)
 11. Minimize IDs (`-i` or `-d`)
+12. Connectivity analyzer (`--analyze-connectivity`)
 
 ## 7. License
 

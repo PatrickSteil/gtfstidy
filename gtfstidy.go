@@ -190,6 +190,7 @@ func main() {
 	stopReclusterDistance := flag.Float64P("recluster-stops-dist", "", 75.0, "distance threshold for stop reclustering with -E")
 	stopReclusterSimiThreshold := flag.Float64P("recluster-stops-simi", "", 0.55, "similarity threshold for stop reclustering with -E")
 	useStopAverager := flag.BoolP("fix-far-away-parents", "", false, "try to fix too far away parent stations by averaging their position to childrens")
+	analyzeConnectivity := flag.BoolP("analyze-connectivity", "", false, "print a report on the connected components of the stop network and on gaps in the service calendar (runs after all other processors; if it is the only processor and no -o is given, no feed is written)")
 	dropShapes := flag.BoolP("drop-shapes", "", false, "drop shapes")
 	polygonFilterCompleteTrips := flag.BoolP("complete-filtered-trips", "", false, "always include complete data for trips filtered e.g. using a geo filter")
 	flag.StringArrayVar(&bboxStrings, "bounding-box", []string{}, "bounding box filter, as comma separated latitude,longitude pairs (multiple boxes allowed by defining --bounding-box multiple times)")
@@ -713,6 +714,14 @@ func main() {
 			minzers = append(minzers, processors.TripIDStabilizer{})
 		}
 
+		// if the analyzer is the only processor and no output was requested,
+		// there is nothing to write
+		analyzeOnly := *analyzeConnectivity && len(minzers) == 0 && !flag.Lookup("output").Changed
+
+		if *analyzeConnectivity {
+			minzers = append(minzers, processors.ConnectivityAnalyzer{})
+		}
+
 		// do processing
 		for _, m := range minzers {
 			m.Run(feed)
@@ -975,6 +984,10 @@ func main() {
 					}
 				}
 			}
+		}
+
+		if analyzeOnly {
+			return
 		}
 
 		fmt.Fprintf(os.Stdout, "Outputting GTFS feed to '%s'...", *outputPath)
