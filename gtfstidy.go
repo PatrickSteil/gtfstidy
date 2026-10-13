@@ -191,6 +191,7 @@ func main() {
 	stopReclusterSimiThreshold := flag.Float64P("recluster-stops-simi", "", 0.55, "similarity threshold for stop reclustering with -E")
 	useStopAverager := flag.BoolP("fix-far-away-parents", "", false, "try to fix too far away parent stations by averaging their position to childrens")
 	dropShapes := flag.BoolP("drop-shapes", "", false, "drop shapes")
+	dropNonEssential := flag.BoolP("drop-non-essential", "", false, "drop all non-essential data (shapes, fares, levels, pathways, attributions, translations, feed info), keeping only agencies, stops, routes, trips, stop times, calendars, frequencies and transfers")
 	polygonFilterCompleteTrips := flag.BoolP("complete-filtered-trips", "", false, "always include complete data for trips filtered e.g. using a geo filter")
 	flag.StringArrayVar(&bboxStrings, "bounding-box", []string{}, "bounding box filter, as comma separated latitude,longitude pairs (multiple boxes allowed by defining --bounding-box multiple times)")
 	flag.StringArrayVar(&polygonStrings, "polygon", []string{}, "polygon filter, as comma separated latitude,longitude pairs (multiple polygons allowed by defining --polygon multiple times)")
@@ -443,7 +444,7 @@ func main() {
 	opts.ZipFix = *fixZip
 	opts.ShowWarnings = *showWarnings
 	opts.ShowWarningsExtensive = *showWarningsExtensive
-	opts.DropShapes = *dropShapes
+	opts.DropShapes = *dropShapes || *dropNonEssential
 	opts.KeepAddFlds = *keepFields
 	opts.DateFilterStart = startDate
 	opts.DateFilterEnd = endDate
@@ -555,6 +556,10 @@ func main() {
 		os.Exit(1)
 	} else {
 		minzers := make([]processors.Processor, 0)
+
+		if *dropNonEssential && !*onlyValidate {
+			minzers = append(minzers, processors.NonEssentialDropper{})
+		}
 
 		if *dropTooFast {
 			minzers = append(minzers, processors.TooFastTripRemover{})
