@@ -24,6 +24,8 @@ type TripIDStabilizer struct {
 func (minimizer TripIDStabilizer) Run(feed *gtfsparser.Feed) {
 	fmt.Fprintf(os.Stdout, "Stabilizing trip ids... ")
 
+	flds := addFldsRenamers{newAddFldsRenamer(feed.TripsAddFlds), newAddFldsRenamer(feed.StopTimesAddFlds), newAddFldsRenamer(feed.FrequenciesAddFlds)}
+
 	newMap := make(map[string]*gtfs.Trip)
 	for _, t := range feed.Trips {
 		oldId := t.Id
@@ -41,18 +43,11 @@ func (minimizer TripIDStabilizer) Run(feed *gtfsparser.Feed) {
 		newMap[t.Id] = t
 
 		// update additional fields
-		for k := range feed.TripsAddFlds {
-			feed.TripsAddFlds[k][newId] = feed.TripsAddFlds[k][oldId]
-			delete(feed.TripsAddFlds[k], oldId)
-		}
-
-		for k := range feed.StopTimesAddFlds {
-			feed.StopTimesAddFlds[k][newId] = feed.StopTimesAddFlds[k][oldId]
-			delete(feed.StopTimesAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Trips = newMap
+	flds.apply()
 
 	fmt.Fprintf(os.Stdout, "done.\n")
 }
