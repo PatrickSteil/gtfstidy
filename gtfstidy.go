@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -100,7 +101,20 @@ func parseCoords(s string) ([][2]float64, error) {
 	return ret, nil
 }
 
+// The GC percentage used if the user did not set GOGC. The feed is held in memory
+// completely, and with Go's default of 100, the heap may grow to twice the size
+// of the data that is still in use before it is collected.
+const defaultGCPercent = 50
+
+func configureGC() {
+	if _, ok := os.LookupEnv("GOGC"); !ok {
+		debug.SetGCPercent(defaultGCPercent)
+	}
+}
+
 func main() {
+	configureGC()
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "gtfstidy - (C) 2016-2026 by Patrick Brosi <info@patrickbrosi.de>. Contributions by Patrick Steil, Davids Paskevics, and others.\n\nUsage:\n\n  %s [<options>] [-o <outputfile>] <input GTFS>\n\nAllowed options:\n\n", os.Args[0])
 		flag.PrintDefaults()
