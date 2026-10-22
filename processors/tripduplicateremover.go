@@ -13,6 +13,7 @@ import (
 	gtfs "github.com/patrickbr/gtfsparser/gtfs"
 	"hash/fnv"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,11 +29,19 @@ type TripDuplicateRemover struct {
 	serviceList map[*gtfs.Service][]uint16
 	refDate     time.Time
 	serviceRefs map[*gtfs.Service]int
+
+	// groups of trips that have the same hash, see getTripGroups
+	groups [][]*gtfs.Trip
 }
 
 type Overlap struct {
 	Trip  *gtfs.Trip
 	Dates []uint16
+}
+
+type hashedTrip struct {
+	hash uint64
+	trip *gtfs.Trip
 }
 
 // Run this TripDuplicateRemover on some feed
@@ -550,37 +559,116 @@ func (m *TripDuplicateRemover) typeComp(a int16, b int16) bool {
 	return gtfs.GetTypeFromExtended(a) == gtfs.GetTypeFromExtended(b)
 }
 
+// Distributes the groups of trips that could be merged on chunks that can be
+// processed in parallel.
 func (m *TripDuplicateRemover) getTripChunks(feed *gtfsparser.Feed) [][][]*gtfs.Trip {
 	numChunks := MaxParallelism()
 
-	trips := make(map[uint64][]*gtfs.Trip)
+	if m.groups == nil {
+		m.groups = m.getTripGroups(feed)
+	} else {
+		m.removeDeletedTrips(feed)
+	}
+
+	chunksize := (len(m.groups) + numChunks - 1) / numChunks
+	chunks := make([][][]*gtfs.Trip, numChunks)
+
+	for i := range chunks {
+		start := imin(i*chunksize, len(m.groups))
+		end := imin(start+chunksize, len(m.groups))
+
+		chunks[i] = m.groups[start:end:end]
+	}
+
+	return chunks
+}
+
+// Groups the trips of the feed by their hash. Only groups with at least two trips
+// are returned, because a trip that is alone in its group cannot be merged with any
+// other trip. Merging trips does not change the hash of the remaining ones, so this
+// is only done once.
+func (m *TripDuplicateRemover) getTripGroups(feed *gtfsparser.Feed) [][]*gtfs.Trip {
+	hashed := make([]hashedTrip, 0, len(feed.Trips))
 
 	for _, t := range feed.Trips {
 		if len(t.StopTimes) == 0 {
 			continue
 		}
 
-		hash := m.tripHash(t)
-		trips[hash] = append(trips[hash], t)
+		hashed = append(hashed, hashedTrip{m.tripHash(t), t})
 	}
 
-	chunksize := (len(trips) + numChunks - 1) / numChunks
-	chunks := make([][][]*gtfs.Trip, numChunks)
-	curchunk := 0
+	// trips with the same hash are next to each other now
+	sort.Slice(hashed, func(i, j int) bool { return hashed[i].hash < hashed[j].hash })
 
-	for hash := range trips {
-		chunks[curchunk] = append(chunks[curchunk], make([]*gtfs.Trip, 0))
+	numGroups := 0
+	numTrips := 0
 
-		for _, t := range trips[hash] {
-			chunks[curchunk][len(chunks[curchunk])-1] = append(chunks[curchunk][len(chunks[curchunk])-1], t)
+	for i := 0; i < len(hashed); {
+		end := nextHashGroup(hashed, i)
+
+		if end-i > 1 {
+			numGroups++
+			numTrips += end - i
 		}
 
-		if len(chunks[curchunk]) == chunksize {
-			curchunk++
+		i = end
+	}
+
+	// the groups share a single backing array
+	groups := make([][]*gtfs.Trip, 0, numGroups)
+	trips := make([]*gtfs.Trip, 0, numTrips)
+
+	for i := 0; i < len(hashed); {
+		end := nextHashGroup(hashed, i)
+
+		if end-i > 1 {
+			first := len(trips)
+
+			for _, h := range hashed[i:end] {
+				trips = append(trips, h.trip)
+			}
+
+			groups = append(groups, trips[first:len(trips):len(trips)])
+		}
+
+		i = end
+	}
+
+	return groups
+}
+
+// Removes the trips that were merged into other trips from the groups, and the
+// groups that don't have at least two trips left.
+func (m *TripDuplicateRemover) removeDeletedTrips(feed *gtfsparser.Feed) {
+	kept := m.groups[:0]
+
+	for _, group := range m.groups {
+		alive := group[:0]
+
+		for _, t := range group {
+			if feed.Trips[t.Id] == t {
+				alive = append(alive, t)
+			}
+		}
+
+		if len(alive) > 1 {
+			kept = append(kept, alive)
 		}
 	}
 
-	return chunks
+	m.groups = kept
+}
+
+// Returns the index after the last trip that has the same hash as the trip at index start
+func nextHashGroup(hashed []hashedTrip, start int) int {
+	end := start + 1
+
+	for end < len(hashed) && hashed[end].hash == hashed[start].hash {
+		end++
+	}
+
+	return end
 }
 
 func (m *TripDuplicateRemover) tripHash(t *gtfs.Trip) uint64 {
