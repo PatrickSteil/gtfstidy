@@ -41,6 +41,16 @@ You can use
 
 to do a simple feed validation.
 
+### Memory usage
+
+gtfstidy holds the complete feed in memory. A feed with 22 million stop times and 1.3 million trips, for example, needs about 2 GB just for parsing it. Some processors need additional memory while they run.
+
+The Go garbage collector is configured to run when the heap has grown by 50% (`GOGC=50`, instead of Go's default of 100). If you need to save more memory, and can live with a longer run time, set `GOGC` to a smaller value:
+
+	$ GOGC=25 gtfstidy <options> <feed>
+
+You can also set a soft memory limit with `GOMEMLIMIT`, for example `GOMEMLIMIT=8GiB`.
+
 ## 3. Example
 
 Process the SFMTA-Feed with all processors enabled:
