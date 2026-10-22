@@ -204,6 +204,12 @@ func (sdr StopDuplicateRemover) combineStops(feed *gtfsparser.Feed, stops []*gtf
 		}
 
 		for _, tk := range transfers[s] {
+			val, ok := feed.Transfers[tk]
+			if !ok {
+				// the key was already rewritten when merging another stop of this group
+				continue
+			}
+
 			// update the  key
 			tk_new := tk
 
@@ -216,12 +222,19 @@ func (sdr StopDuplicateRemover) combineStops(feed *gtfsparser.Feed, stops []*gtf
 				tk_new.To_stop = ref
 			}
 
-			if _, ok := feed.Transfers[tk_new]; !ok {
-				feed.Transfers[tk_new] = feed.Transfers[tk]
-				delete(feed.Transfers, tk)
+			// the old key references s, which is deleted below
+			feed.DeleteTransfer(tk)
 
-				// add new transfer to transfer refs
-				transfers[ref] = append(transfers[ref], tk_new)
+			// if there already is a transfer for the new key, it takes precedence
+			if _, ok := feed.Transfers[tk_new]; !ok {
+				feed.Transfers[tk_new] = val
+
+				// add new transfer to the transfer refs of both of its stops, the other
+				// one might still be merged later on
+				transfers[tk_new.From_stop] = append(transfers[tk_new.From_stop], tk_new)
+				if tk_new.To_stop != tk_new.From_stop {
+					transfers[tk_new.To_stop] = append(transfers[tk_new.To_stop], tk_new)
+				}
 			}
 		}
 
