@@ -262,10 +262,17 @@ func (m *StopReclusterer) writeCluster(cl *StopCluster, feed *gtfsparser.Feed) {
 				tk_new.To_stop = parent
 			}
 
+			if tk_new == tk {
+				continue
+			}
+
+			// if there already is a transfer for the new key, it takes precedence
 			if _, ok := feed.Transfers[tk_new]; !ok {
 				feed.Transfers[tk_new] = tv
-				delete(feed.Transfers, tk)
 			}
+
+			// the old key references st, which is deleted below
+			feed.DeleteTransfer(tk)
 		}
 
 		for _, p := range feed.Pathways {
