@@ -59,11 +59,11 @@ func parseDate(str string) gtfs.Date {
 		e = fmt.Errorf("day must be in the range [1, 31]")
 	}
 
-	if e == nil && month < 1 || month > 12 {
+	if e == nil && (month < 1 || month > 12) {
 		e = fmt.Errorf("month must be in the range [1, 12]")
 	}
 
-	if e == nil && year < 1900 || year > (1900+255) {
+	if e == nil && (year < 1900 || year > (1900+255)) {
 		e = fmt.Errorf("date must be in the range [19000101, 21551231]")
 	}
 
