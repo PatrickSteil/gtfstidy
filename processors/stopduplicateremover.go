@@ -64,22 +64,17 @@ func (sdr StopDuplicateRemover) Run(feed *gtfsparser.Feed) {
 		}
 	}
 
+	// maps stops that were merged into another stop to that stop
+	merged := make(map[*gtfs.Stop]*gtfs.Stop)
+
 	// run multiple times to catch parent equivalencies
 	for i := 0; i < 3; i++ {
-		stoptimes := make(map[*gtfs.Stop][]*gtfs.StopTime, len(feed.Stops))
 		stops := make(map[*gtfs.Stop][]*gtfs.Stop, len(feed.Stops))
 		transfers := make(map[*gtfs.Stop][]gtfs.TransferKey, len(feed.Stops))
 		pathways := make(map[*gtfs.Stop][]*gtfs.Pathway, len(feed.Stops))
 		proced := make(map[*gtfs.Stop]bool, len(feed.Stops))
 
 		chunks := sdr.getStopChunks(feed)
-
-		// collect stop times that use stops
-		for _, t := range feed.Trips {
-			for i, st := range t.StopTimes {
-				stoptimes[st.Stop()] = append(stoptimes[st.Stop()], &t.StopTimes[i])
-			}
-		}
 
 		// collect stops that use stops as parents
 		for _, s := range feed.Stops {
@@ -116,7 +111,7 @@ func (sdr StopDuplicateRemover) Run(feed *gtfsparser.Feed) {
 			eqStops := sdr.getEquivalentStops(s, feed, chunks[hash])
 
 			if len(eqStops) > 0 {
-				sdr.combineStops(feed, append(eqStops, s), stoptimes, stops, transfers, pathways)
+				sdr.combineStops(feed, append(eqStops, s), merged, stops, transfers, pathways)
 
 				for _, s := range eqStops {
 					proced[s] = true
@@ -127,7 +122,40 @@ func (sdr StopDuplicateRemover) Run(feed *gtfsparser.Feed) {
 		}
 	}
 
+	sdr.rewriteStopTimes(feed, merged)
+
 	fmt.Fprintf(os.Stdout, "done. (-%d stops [-%.2f%%])\n", (bef - len(feed.Stops)), 100.0*float64(bef-len(feed.Stops))/float64(bef))
+}
+
+// Replace the stops that were merged into another stop in all stop times. This is
+// done once at the end instead of keeping an index of the stop times of each stop,
+// which needs memory proportional to the number of stop times.
+func (sdr StopDuplicateRemover) rewriteStopTimes(feed *gtfsparser.Feed, merged map[*gtfs.Stop]*gtfs.Stop) {
+	if len(merged) == 0 {
+		return
+	}
+
+	// a stop that was merged into another stop might have been merged itself later on,
+	// follow these chains to the stop that is still part of the feed
+	for s, ref := range merged {
+		for {
+			next, ok := merged[ref]
+			if !ok {
+				break
+			}
+			ref = next
+		}
+
+		merged[s] = ref
+	}
+
+	for _, t := range feed.Trips {
+		for i := range t.StopTimes {
+			if ref, ok := merged[t.StopTimes[i].Stop()]; ok {
+				t.StopTimes[i].SetStop(ref)
+			}
+		}
+	}
 }
 
 // Returns the feed's stops that are equivalent to stop
@@ -168,7 +196,7 @@ func (sdr StopDuplicateRemover) getEquivalentStops(stop *gtfs.Stop, feed *gtfspa
 }
 
 // Combine a slice of equal stops into a single stop
-func (sdr StopDuplicateRemover) combineStops(feed *gtfsparser.Feed, stops []*gtfs.Stop, stoptimes map[*gtfs.Stop][]*gtfs.StopTime, pstops map[*gtfs.Stop][]*gtfs.Stop, transfers map[*gtfs.Stop][]gtfs.TransferKey, pathways map[*gtfs.Stop][]*gtfs.Pathway) {
+func (sdr StopDuplicateRemover) combineStops(feed *gtfsparser.Feed, stops []*gtfs.Stop, merged map[*gtfs.Stop]*gtfs.Stop, pstops map[*gtfs.Stop][]*gtfs.Stop, transfers map[*gtfs.Stop][]gtfs.TransferKey, pathways map[*gtfs.Stop][]*gtfs.Pathway) {
 	// heuristic: use the stop with the most colons as the reference stop, to prefer
 	// stops with global ID of the form de:54564:345:3 over something like 5542, and to
 	// also prefer more specific global IDs. If the number of colons is equivalent,
@@ -189,12 +217,8 @@ func (sdr StopDuplicateRemover) combineStops(feed *gtfsparser.Feed, stops []*gtf
 			continue
 		}
 
-		for i, st := range stoptimes[s] {
-			if st.Stop() == s {
-				stoptimes[s][i].SetStop(ref)
-				stoptimes[ref] = append(stoptimes[ref], stoptimes[s][i])
-			}
-		}
+		// the stop times are updated in rewriteStopTimes
+		merged[s] = ref
 
 		for i, ps := range pstops[s] {
 			if ps.Parent_station == s {
