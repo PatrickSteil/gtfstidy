@@ -31,6 +31,58 @@ type IDMinimizer struct {
 	KeepAttributions bool
 }
 
+// An addFldsRenamer moves the additional field values (field name -> id -> value) of
+// entities to their new id. The values are collected under the new ids while the old
+// ones are still in place, and replace them in apply(). Moving them one by one would
+// overwrite (or delete) values if a new id is the old id of another entity.
+type addFldsRenamer[V any] struct {
+	flds    map[string]map[string]V
+	renamed map[string]map[string]V
+}
+
+func newAddFldsRenamer[V any](flds map[string]map[string]V) *addFldsRenamer[V] {
+	return &addFldsRenamer[V]{flds, make(map[string]map[string]V, len(flds))}
+}
+
+func (r *addFldsRenamer[V]) rename(oldId string, newId string) {
+	for k, vals := range r.flds {
+		if v, ok := vals[oldId]; ok {
+			if r.renamed[k] == nil {
+				r.renamed[k] = make(map[string]V)
+			}
+			r.renamed[k][newId] = v
+		}
+	}
+}
+
+func (r *addFldsRenamer[V]) apply() {
+	for k := range r.flds {
+		if r.renamed[k] == nil {
+			r.flds[k] = make(map[string]V)
+		} else {
+			r.flds[k] = r.renamed[k]
+		}
+	}
+}
+
+// addFldsRenamers renames the additional fields of different types at once
+type addFldsRenamers []interface {
+	rename(oldId string, newId string)
+	apply()
+}
+
+func (rs addFldsRenamers) rename(oldId string, newId string) {
+	for _, r := range rs {
+		r.rename(oldId, newId)
+	}
+}
+
+func (rs addFldsRenamers) apply() {
+	for _, r := range rs {
+		r.apply()
+	}
+}
+
 // Run this IDMinimizer on a feed
 func (minimizer IDMinimizer) Run(feed *gtfsparser.Feed) {
 	j := 10
@@ -139,6 +191,8 @@ func (minimizer IDMinimizer) Run(feed *gtfsparser.Feed) {
 func (minimizer IDMinimizer) minimizeTripIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
 
+	flds := addFldsRenamers{newAddFldsRenamer(feed.TripsAddFlds), newAddFldsRenamer(feed.StopTimesAddFlds), newAddFldsRenamer(feed.FrequenciesAddFlds)}
+
 	newMap := make(map[string]*gtfs.Trip)
 	for _, t := range feed.Trips {
 		oldId := t.Id
@@ -148,23 +202,18 @@ func (minimizer IDMinimizer) minimizeTripIds(feed *gtfsparser.Feed) {
 		newMap[t.Id] = t
 
 		// update additional fields
-		for k := range feed.TripsAddFlds {
-			feed.TripsAddFlds[k][newId] = feed.TripsAddFlds[k][oldId]
-			delete(feed.TripsAddFlds[k], oldId)
-		}
-
-		for k := range feed.StopTimesAddFlds {
-			feed.StopTimesAddFlds[k][newId] = feed.StopTimesAddFlds[k][oldId]
-			delete(feed.StopTimesAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Trips = newMap
+	flds.apply()
 }
 
 // Minimize shape IDs
 func (minimizer IDMinimizer) minimizeShapeIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
+
+	flds := newAddFldsRenamer(feed.ShapesAddFlds)
 
 	newMap := make(map[string]*gtfs.Shape)
 	for _, s := range feed.Shapes {
@@ -175,18 +224,18 @@ func (minimizer IDMinimizer) minimizeShapeIds(feed *gtfsparser.Feed) {
 		newMap[s.Id] = s
 
 		// update additional fields
-		for k := range feed.ShapesAddFlds {
-			feed.ShapesAddFlds[k][newId] = feed.ShapesAddFlds[k][oldId]
-			delete(feed.ShapesAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Shapes = newMap
+	flds.apply()
 }
 
 // Minimize route IDs
 func (minimizer IDMinimizer) minimizeRouteIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
+
+	flds := newAddFldsRenamer(feed.RoutesAddFlds)
 
 	newMap := make(map[string]*gtfs.Route)
 	for _, r := range feed.Routes {
@@ -197,13 +246,11 @@ func (minimizer IDMinimizer) minimizeRouteIds(feed *gtfsparser.Feed) {
 		newMap[r.Id] = r
 
 		// update additional fields
-		for k := range feed.RoutesAddFlds {
-			feed.RoutesAddFlds[k][newId] = feed.RoutesAddFlds[k][oldId]
-			delete(feed.RoutesAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Routes = newMap
+	flds.apply()
 }
 
 // Minimize service IDs
@@ -224,6 +271,8 @@ func (minimizer IDMinimizer) minimizeServiceIds(feed *gtfsparser.Feed) {
 func (minimizer IDMinimizer) minimizeStopIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
 
+	flds := newAddFldsRenamer(feed.StopsAddFlds)
+
 	newMap := make(map[string]*gtfs.Stop)
 	for _, s := range feed.Stops {
 		oldId := s.Id
@@ -233,13 +282,11 @@ func (minimizer IDMinimizer) minimizeStopIds(feed *gtfsparser.Feed) {
 		newMap[s.Id] = s
 
 		// update additional fields
-		for k := range feed.StopsAddFlds {
-			feed.StopsAddFlds[k][newId] = feed.StopsAddFlds[k][oldId]
-			delete(feed.StopsAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Stops = newMap
+	flds.apply()
 }
 
 // Minimize attribution IDs
@@ -284,6 +331,8 @@ func (minimizer IDMinimizer) minimizeAttributionIds(feed *gtfsparser.Feed) {
 func (minimizer IDMinimizer) minimizeAgencyIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
 
+	flds := newAddFldsRenamer(feed.AgenciesAddFlds)
+
 	newMap := make(map[string]*gtfs.Agency)
 	for _, a := range feed.Agencies {
 		oldId := a.Id
@@ -293,18 +342,18 @@ func (minimizer IDMinimizer) minimizeAgencyIds(feed *gtfsparser.Feed) {
 		newMap[a.Id] = a
 
 		// update additional fields
-		for k := range feed.AgenciesAddFlds {
-			feed.AgenciesAddFlds[k][newId] = feed.AgenciesAddFlds[k][oldId]
-			delete(feed.AgenciesAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Agencies = newMap
+	flds.apply()
 }
 
 // Minimize fare IDs
 func (minimizer IDMinimizer) minimizeFareIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
+
+	flds := addFldsRenamers{newAddFldsRenamer(feed.FareAttributesAddFlds), newAddFldsRenamer(feed.FareRulesAddFlds)}
 
 	newMap := make(map[string]*gtfs.FareAttribute)
 	for _, a := range feed.FareAttributes {
@@ -315,18 +364,18 @@ func (minimizer IDMinimizer) minimizeFareIds(feed *gtfsparser.Feed) {
 		newMap[a.Id] = a
 
 		// update additional fields
-		for k := range feed.FareAttributesAddFlds {
-			feed.FareAttributesAddFlds[k][newId] = feed.FareAttributesAddFlds[k][oldId]
-			delete(feed.FareAttributesAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.FareAttributes = newMap
+	flds.apply()
 }
 
 // Minimize pathway IDs
 func (minimizer IDMinimizer) minimizePathwayIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
+
+	flds := newAddFldsRenamer(feed.PathwaysAddFlds)
 
 	newMap := make(map[string]*gtfs.Pathway)
 	for _, a := range feed.Pathways {
@@ -337,18 +386,18 @@ func (minimizer IDMinimizer) minimizePathwayIds(feed *gtfsparser.Feed) {
 		newMap[a.Id] = a
 
 		// update additional fields
-		for k := range feed.PathwaysAddFlds {
-			feed.PathwaysAddFlds[k][newId] = feed.PathwaysAddFlds[k][oldId]
-			delete(feed.PathwaysAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Pathways = newMap
+	flds.apply()
 }
 
 // Minimize level IDs
 func (minimizer IDMinimizer) minimizeLevelIds(feed *gtfsparser.Feed) {
 	var idCount int64 = 1
+
+	flds := newAddFldsRenamer(feed.LevelsAddFlds)
 
 	newMap := make(map[string]*gtfs.Level)
 	for _, a := range feed.Levels {
@@ -359,11 +408,9 @@ func (minimizer IDMinimizer) minimizeLevelIds(feed *gtfsparser.Feed) {
 		newMap[a.Id] = a
 
 		// update additional fields
-		for k := range feed.LevelsAddFlds {
-			feed.LevelsAddFlds[k][newId] = feed.LevelsAddFlds[k][oldId]
-			delete(feed.LevelsAddFlds[k], oldId)
-		}
+		flds.rename(oldId, newId)
 	}
 
 	feed.Levels = newMap
+	flds.apply()
 }
