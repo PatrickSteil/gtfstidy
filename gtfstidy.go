@@ -85,9 +85,9 @@ func parseCoords(s string) ([][2]float64, error) {
 	for i := 0; i < len(coords)/2; i++ {
 		var x, y float64
 		var err error
-		y, err = strconv.ParseFloat(strings.Trim(coords[i*2], "\n "), 64)
+		y, err = strconv.ParseFloat(strings.TrimSpace(coords[i*2]), 64)
 		if err == nil {
-			x, err = strconv.ParseFloat(strings.Trim(coords[i*2+1], "\n "), 64)
+			x, err = strconv.ParseFloat(strings.TrimSpace(coords[i*2+1]), 64)
 		}
 
 		if err != nil {
